@@ -6,6 +6,17 @@ const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
  *
  * @type {import('@react-native/metro-config').MetroConfig}
  */
-const config = {};
+const config = {
+  projectRoot: __dirname,
+  
+  // Optimize resolver
+  resolver: {
+    // Exclude large node_modules directories to speed up builds
+    blockList: [
+      /android\/.*\/build\//,
+      /ios\/Pods\//,
+    ],
+  },
+};
 
 module.exports = mergeConfig(getDefaultConfig(__dirname), config);
