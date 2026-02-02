@@ -10,6 +10,7 @@ import { requestAllPermissions } from '../services/permissionsService';
 const RootNavigator = () => {
   const { user, checkLogin, isLoading } = useAuthStore();
   const [isInitializing, setIsInitializing] = React.useState(true);
+  const [isNavReady, setIsNavReady] = React.useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -21,10 +22,13 @@ const RootNavigator = () => {
 
   // Request permissions when user logs in
   useEffect(() => {
-    if (user && !isInitializing) {
-      requestAllPermissions();
+    if (user && !isInitializing && isNavReady) {
+      // Delay to ensure Activity is attached
+      setTimeout(() => {
+        requestAllPermissions();
+      }, 300);
     }
-  }, [user, isInitializing]);
+  }, [user, isInitializing, isNavReady]);
 
   if (isInitializing) {
     return (
@@ -35,7 +39,10 @@ const RootNavigator = () => {
   }
 
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer
+      ref={navigationRef}
+      onReady={() => setIsNavReady(true)}
+    >
       {user ? <AppNavigator /> : <AuthNavigator />}
     </NavigationContainer>
   );

@@ -131,11 +131,7 @@ const SingleCard = (props: Props) => {
       <TouchableWithoutFeedback>
         <View style={styles.topContainer}>
           <Text style={styles.topLeftContainer}>{props.data.regNo}</Text>
-          <Text
-            style={{
-              paddingVertical: 5,
-            }}
-          >
+          <Text style={styles.vehicleNameText}>
             {props.data.vehicleName}
           </Text>
         </View>
@@ -244,20 +240,24 @@ export default SingleCard;
 const styles = StyleSheet.create({
   topContainer: {
     flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
     marginRight: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
   iconContainer: {
     position: "absolute",
-    top: 10,
-    right: 20,
+    top: 12,
+    right: 12,
   },
   iconStack: {
-    gap: 12,
+    gap: 8,
   },
   iconTextContainer: {
     position: "absolute",
-    bottom: 10,
-    left: 20,
+    bottom: 12,
+    left: 12,
   },
   cashContainer: {
     justifyContent: "center",
@@ -268,9 +268,9 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   cashAmount: {
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: "bold",
-    marginRight: 12,
+    marginRight: 8,
   },
   handImage: {
     width: 25,
@@ -286,40 +286,54 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 5,
     borderTopLeftRadius: 5,
     minWidth: "10%",
-    maxWidth: "60%",
+    maxWidth: "40%",
     paddingLeft: 15,
     paddingRight: 10,
     paddingVertical: 5,
     marginRight: 10,
+    flexShrink: 0,
+  },
+  vehicleNameText: {
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    flexWrap: "wrap",
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1a1a1a",
   },
   footer: {
     flexDirection: "row",
     justifyContent: "flex-end",
-    padding: 10,
-    gap: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 6,
   },
   outlineButton: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: COLORS.secondary,
     borderRadius: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    backgroundColor: "#fff",
   },
   outlineButtonText: {
     color: COLORS.primary,
-    fontSize: 14,
-    fontWeight: "500",
+    fontSize: 13,
+    fontWeight: "600",
   },
   primaryButton: {
     backgroundColor: COLORS.Dashboard.text.Blue,
     borderRadius: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
   },
   primaryButtonText: {
     color: "white",
-    fontSize: 14,
-    fontWeight: "500",
+    fontSize: 13,
+    fontWeight: "600",
   },
 });
 
@@ -327,18 +341,19 @@ const cardTile = StyleSheet.create({
   card: {
     padding: 0,
     minHeight: 50,
-    marginBottom: 20,
+    marginBottom: 8,
+    marginHorizontal: 4,
     position: "relative",
     backgroundColor: "white",
-    borderRadius: 8,
+    borderRadius: 10,
     shadowColor: "#000",
     shadowOffset: {
       width: 0,
       height: 2,
     },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 4,
   },
   container: {
     flexDirection: "row",
@@ -346,20 +361,22 @@ const cardTile = StyleSheet.create({
     marginRight: 10,
   },
   body: {
-    paddingVertical: 15,
-    paddingLeft: 20,
-    gap: 10,
+    paddingVertical: 4,
+    paddingLeft: 10,
+    gap: 4,
   },
   textPrimary: {
     fontWeight: "600",
     color: COLORS.primary,
-    minWidth: 85,
-    maxWidth: 105,
-    marginRight: 10,
+    minWidth: 75,
+    maxWidth: 95,
+    marginRight: 8,
+    fontSize: 13,
   },
   textSecondary: {
-    color: "black",
-    fontWeight: "bold",
+    color: "#333",
+    fontWeight: "600",
+    fontSize: 13,
   },
   status: {
     width: 5,

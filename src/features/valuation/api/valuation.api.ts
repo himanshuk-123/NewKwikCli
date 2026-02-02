@@ -1,6 +1,7 @@
 import apiCallService from '../../../services/apiCallService';
 import { AppStepListDataRecord, AppStepListResponse } from '../types';
 import { ToastAndroid } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const fetchAppStepListApi = async (leadId: string): Promise<AppStepListDataRecord[]> => {
   try {
@@ -86,40 +87,62 @@ export const uploadValuationVideoApi = async (
   leadId: string
 ): Promise<any> => {
   try {
+    // Get user credentials (for TokenID)
+    const userCredsJson = await AsyncStorage.getItem('user_credentials');
+    const userCreds = userCredsJson ? JSON.parse(userCredsJson) : {};
+    const tokenId = userCreds?.TOKENID || '';
+
+    if (!tokenId) {
+      throw new Error('User token not found. Please login again.');
+    }
+
     const formData = new FormData();
     const normalizedUri = videoUri.startsWith('file://') ? videoUri : `file://${videoUri}`;
 
+    console.log('[API] Preparing video upload FormData:', {
+      LeadId: leadId,
+      VideoUri: normalizedUri,
+      TokenID: tokenId,
+    });
+
+    // Append in exact order like production app
     formData.append('LeadId', leadId);
     formData.append('Video1', Date.now().toString());
+    formData.append('TokenID', tokenId);
     formData.append('Version', '2');
     formData.append('Video1', {
       name: 'Video.mp4',
       type: 'video/mp4',
       uri: normalizedUri,
     } as any);
-console.log('[API] Video Upload FormData prepared:', {
-      LeadId: leadId,
-      VideoUri: normalizedUri,
-    });
+
+    console.log('[API] FormData created, making request to DocumentUploadVideo');
+
     const response = await apiCallService.post({
       service: 'App/webservice/DocumentUploadVideo',
       body: formData,
       headers: {
         'Content-Type': 'multipart/form-data',
+        'Accept': '*/*',
         'Version': '2',
       },
+      timeout: 60000, // Extended timeout for large video files
     });
-console.log('[API] Video Upload Response:', response);
+
+    console.log('[API] Video Upload Response:', response);
+
+    if (!response) {
+      throw new Error('No response from server');
+    }
+
     if (response?.ERROR && response.ERROR !== '0') {
-      ToastAndroid.show(response.MESSAGE || 'Video upload failed', ToastAndroid.SHORT);
-      return null;
+      throw new Error(response.MESSAGE || 'Video upload failed');
     }
 
     return response;
   } catch (error: any) {
     console.error('[API] Video Upload Exception:', error?.message || error);
-    ToastAndroid.show('Failed to upload video', ToastAndroid.SHORT);
-    return null;
+    throw new Error(error?.message || 'Failed to upload video. Please check your internet connection.');
   }
 };
 

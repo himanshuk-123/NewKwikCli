@@ -9,6 +9,7 @@ import {
   RefreshControl,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 import MaterialIcons from "react-native-vector-icons/MaterialIcons";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { PieChart } from "react-native-gifted-charts";
@@ -89,11 +90,15 @@ const Dashboard = () => {
 
   const roleId = Number(user?.roleId ?? -1);
   const [refreshing, setRefreshing] = useState(false);
+  const [hasRefreshedOnce, setHasRefreshedOnce] = useState(false);
 
-  // 1. Initial Fetch on Mount (Replcaing useFocusEffect)
+  // 1. Initial Fetch on Mount
   useEffect(() => {
-    fetchDashboardData();
-  }, [fetchDashboardData]);
+    if (!hasRefreshedOnce) {
+      fetchDashboardData();
+      setHasRefreshedOnce(true);
+    }
+  }, [fetchDashboardData, hasRefreshedOnce]);
 
   // 2. Pull Request Handler
   const onRefresh = useCallback(async () => {
@@ -101,6 +106,14 @@ const Dashboard = () => {
     await fetchDashboardData();
     setRefreshing(false);
   }, [fetchDashboardData]);
+
+  // 3. Refresh dashboard when coming back from CreateLeads (first focus after CreateLeads closes)
+  useFocusEffect(
+    useCallback(() => {
+      // Refresh on focus since user might have created a new lead
+      fetchDashboardData();
+    }, [fetchDashboardData])
+  );
 
   // ✅ Safe AFTER null check
   const assigned = dashboardData?.Assignedlead ?? 0;

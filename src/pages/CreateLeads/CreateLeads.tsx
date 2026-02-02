@@ -93,6 +93,8 @@ const CreateLeads = () => {
   const navigation = useNavigation();
   const [showModal, setShowModal] = useState(false);
   const [filterData, setFilterData] = useState("");
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [isModalLoading, setIsModalLoading] = useState(false);
 
   // Local state for BottomSheet to handle dynamic lists
   const [bottomSheetData, setBottomSheetData] = useState<{
@@ -133,7 +135,8 @@ const CreateLeads = () => {
     }
     if (successMessage) {
       ToastAndroid.show(successMessage, ToastAndroid.LONG);
-      navigation.goBack();
+      // Go back to Dashboard
+      (navigation as any).goBack();
     }
   }, [error, successMessage, navigation]);
 
@@ -143,6 +146,29 @@ const CreateLeads = () => {
     setShowModal(false);
     setFilterData("");
   }, []);
+
+  const getOptionsByKey = useCallback((key: string): string[] => {
+    switch (key) {
+      case "clientName":
+        return dropdowns.companies.map((c) => c.name);
+      case "vehicleType":
+        return dropdowns.vehicleTypes.map((v) => v.name);
+      case "vehicleCategory":
+        return ["2W", "3W", "4W", "FE", "CV", "CE"];
+      case "clientCity":
+        return dropdowns.clientCities;
+      case "customerState":
+        return dropdowns.states;
+      case "yardName":
+        return dropdowns.yards.map((y) => y.name);
+      case "customerCity":
+        return dropdowns.customerCities;
+      case "customerArea":
+        return dropdowns.areas.map((a) => a.name);
+      default:
+        return [];
+    }
+  }, [dropdowns]);
 
   // Back Button for Modal
   useEffect(() => {
@@ -177,10 +203,28 @@ const CreateLeads = () => {
     submit();
   };
 
-  const openSelection = (key: string, list: string[]) => {
-    setBottomSheetData({ key, value: list });
+  const openSelection = (key: string) => {
+    // Always open modal and clear old list to avoid showing stale data
+    setBottomSheetData({ key, value: [] });
+    setPendingKey(key);
+    setIsModalLoading(true);
+    setFilterData("");
     handlePresentModalPress();
   };
+
+  useEffect(() => {
+    if (!pendingKey) return;
+    const list = getOptionsByKey(pendingKey);
+    if (list.length > 0 && !isLoading) {
+      setBottomSheetData({ key: pendingKey, value: list });
+      setPendingKey(null);
+      setIsModalLoading(false);
+    } else if (!isLoading) {
+      setPendingKey(null);
+      setIsModalLoading(false);
+      ToastAndroid.show("No data available", ToastAndroid.SHORT);
+    }
+  }, [pendingKey, isLoading, getOptionsByKey]);
 
   if (isLoading && !showModal) {
     // Optional blocking loader logic
@@ -195,7 +239,7 @@ const CreateLeads = () => {
         <Selector
           keyText="Client Name"
           valueText={formData.clientName}
-          onPress={() => openSelection("clientName", dropdowns.companies.map(c => c.name))}
+          onPress={() => openSelection("clientName")}
         />
 
         <View style={styles.divider} />
@@ -204,7 +248,7 @@ const CreateLeads = () => {
         <Selector
           keyText="Vehicle Type"
           valueText={formData.vehicleType}
-          onPress={() => openSelection("vehicleType", dropdowns.vehicleTypes.map(v => v.name))}
+          onPress={() => openSelection("vehicleType")}
           disabled={!formData.clientName}
         />
 
@@ -214,7 +258,7 @@ const CreateLeads = () => {
         <Selector
           keyText="Vehicle Category"
           valueText={formData.vehicleCategory}
-          onPress={() => openSelection("vehicleCategory", ["2W", "3W", "4W", "FE", "CV", "CE"])}
+          onPress={() => openSelection("vehicleCategory")}
         />
 
         <View style={styles.divider} />
@@ -223,7 +267,7 @@ const CreateLeads = () => {
         <Selector
           keyText="Client City"
           valueText={formData.clientCity}
-          onPress={() => openSelection("clientCity", dropdowns.clientCities)}
+          onPress={() => openSelection("clientCity")}
         />
 
         <View style={styles.divider} />
@@ -283,7 +327,7 @@ const CreateLeads = () => {
         <Selector
           keyText="Customer State"
           valueText={formData.customerState}
-          onPress={() => openSelection("customerState", dropdowns.states)}
+          onPress={() => openSelection("customerState")}
         />
 
         <View style={styles.divider} />
@@ -299,10 +343,10 @@ const CreateLeads = () => {
             }
 
             if (formData.vehicleType.toLowerCase() === "repo") {
-              openSelection("yardName", dropdowns.yards.map(y => y.name));
+              openSelection("yardName");
             } else {
               // Dynamic Customer Cities based on State
-              openSelection("customerCity", dropdowns.customerCities);
+              openSelection("customerCity");
             }
           }}
         />
@@ -320,7 +364,7 @@ const CreateLeads = () => {
                   ToastAndroid.show("Please Select Customer City first", ToastAndroid.SHORT);
                   return;
                 }
-                openSelection("customerArea", dropdowns.areas.map(a => a.name));
+                openSelection("customerArea");
               }}
             />
 
@@ -380,58 +424,64 @@ const CreateLeads = () => {
               value={filterData}
               onChangeText={setFilterData}
             />
+            {isModalLoading ? (
+              <View style={styles.modalLoader}>
+                <ActivityIndicator size="small" color={COLORS.AppTheme.primary} />
+                <RNText style={styles.modalLoaderText}>Loading options...</RNText>
+              </View>
+            ) : (
+              <FlatList
+                data={bottomSheetData.value.filter((item) =>
+                  item.toLowerCase().includes(filterData.toLowerCase())
+                )}
+                keyExtractor={(item, index) => index.toString()}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.listItem}
+                    onPress={() => {
+                      const key = bottomSheetData.key;
+                      // Trigger Store Actions on Change
+                      setField(key as any, item);
 
-            <FlatList
-              data={bottomSheetData.value.filter((item) =>
-                item.toLowerCase().includes(filterData.toLowerCase())
-              )}
-              keyExtractor={(item, index) => index.toString()}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.listItem}
-                  onPress={() => {
-                    const key = bottomSheetData.key;
-                    // Trigger Store Actions on Change
-                    setField(key as any, item);
-
-                    // Logic Chains (Cascading Dropdowns)
-                    if (key === "clientName") {
-                      fetchVehicleTypesForCompany(item);
-                      setField("vehicleType", ""); // Reset child
-                    }
-                    if (key === "customerState") {
-                      // Fetch Cities and Yards for State
-                      fetchCitiesForState(item);
-                      setField("customerCity", "");
-                      setField("customerArea", "");
-
-                      // If Repo, fetch yards
-                      if (formData.vehicleType.toLowerCase() === "repo") {
-                        fetchYardsForState(item);
-                        setField("yardName", "");
+                      // Logic Chains (Cascading Dropdowns)
+                      if (key === "clientName") {
+                        fetchVehicleTypesForCompany(item);
+                        setField("vehicleType", ""); // Reset child
                       }
-                    }
-                    if (key === "customerCity") {
-                      fetchAreasForCity(item);
-                      setField("customerArea", "");
-                      setField("customerPin", "");
-                    }
-                    if (key === "customerArea") {
-                      const area = dropdowns.areas.find(a => a.name === item);
-                      if (area) {
-                        setField("customerPin", area.pincode.toString());
-                      }
-                    }
+                      if (key === "customerState") {
+                        // Fetch Cities and Yards for State
+                        fetchCitiesForState(item);
+                        setField("customerCity", "");
+                        setField("customerArea", "");
 
-                    handleCloseModalPress();
-                  }}
-                >
-                  <RNText style={styles.listItemText}>
-                    {item.replace("(Client)", "").trim()}
-                  </RNText>
-                </TouchableOpacity>
-              )}
-            />
+                        // If Repo, fetch yards
+                        if (formData.vehicleType.toLowerCase() === "repo") {
+                          fetchYardsForState(item);
+                          setField("yardName", "");
+                        }
+                      }
+                      if (key === "customerCity") {
+                        fetchAreasForCity(item);
+                        setField("customerArea", "");
+                        setField("customerPin", "");
+                      }
+                      if (key === "customerArea") {
+                        const area = dropdowns.areas.find(a => a.name === item);
+                        if (area) {
+                          setField("customerPin", area.pincode.toString());
+                        }
+                      }
+
+                      handleCloseModalPress();
+                    }}
+                  >
+                    <RNText style={styles.listItemText}>
+                      {item.replace("(Client)", "").trim()}
+                    </RNText>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
 
             <TouchableOpacity
               style={styles.closeButton}
@@ -545,6 +595,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#000",
     marginBottom: 20,
+  },
+  modalLoader: {
+    paddingVertical: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  modalLoaderText: {
+    fontSize: 14,
+    color: COLORS.AppTheme.primary,
   },
   listItem: {
     paddingVertical: 15,

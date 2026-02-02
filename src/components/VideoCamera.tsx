@@ -37,7 +37,7 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
   const [timer, setTimer] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const MAX_DURATION = 120; // 2 minutes
+  const MAX_DURATION = 60; // 1 minute
 
   /* ---------- REQUEST PERMISSION ON MOUNT ---------- */
   useEffect(() => {
@@ -63,6 +63,11 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
           const newTime = prev + 1;
           if (newTime >= MAX_DURATION) {
             // Stop recording when max duration reached
+            if (cameraRef.current) {
+              cameraRef.current.stopRecording().catch((error: any) => {
+                console.error('Error stopping recording at max duration:', error);
+              });
+            }
             setIsRecording(false);
             return MAX_DURATION;
           }
@@ -88,26 +93,13 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
     try {
       console.log('[VideoUpload] Starting video upload:', { videoPath, id });
 
-      // Get TOKENID from AsyncStorage
-      const userCreds = await AsyncStorage.getItem('user_credentials');
-      const tokenId = userCreds ? JSON.parse(userCreds)?.TOKENID : '';
-
-      if (!tokenId) {
-        throw new Error('User token not found. Please login again.');
-      }
-
       // Call API
       const response = await uploadValuationVideoApi(videoPath, id.toString());
-
-      // Check response for errors
-      if (response?.ERROR && response.ERROR !== '0') {
-        throw new Error(response?.MESSAGE || 'API returned an error');
-      }
 
       console.log('[VideoUpload] Success:', response);
       ToastAndroid.show('Video uploaded successfully!', ToastAndroid.LONG);
     } catch (error: any) {
-      console.error('[VideoUpload] Failed:', error);
+      console.error('[VideoUpload] Failed:', error?.message || error);
       ToastAndroid.show(
         error?.message || 'Failed to upload video. Please retry.',
         ToastAndroid.LONG
@@ -129,10 +121,13 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
       markSideAsUploaded(side || 'Video', videoPath);
 
       // Show uploading message
-      ToastAndroid.show('Uploading video...', ToastAndroid.SHORT);
+      ToastAndroid.show('Video recorded! Navigating...', ToastAndroid.SHORT);
 
       // Navigate back immediately (same as CustomCamera)
-      navigation.goBack();
+      // Use setTimeout to ensure state updates complete
+      setTimeout(() => {
+        navigation.goBack();
+      }, 500);
 
       // Upload in background with proper error handling
       uploadVideoInBackground(videoPath).catch((error: any) => {
@@ -171,6 +166,9 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
     try {
       setIsRecording(true);
       await cameraRef.current.startRecording({
+        flash: 'off',
+        videoCodec: 'h264',
+        videoBitRate: 'normal',
         onRecordingFinished: (video: any) => {
           handleVideoRecorded(video);
         },
@@ -216,6 +214,9 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
         isActive={isCameraActive}
         video={true}
         audio={true}
+        videoStabilizationMode="standard"
+        videoHdr={false}
+        lowLightBoost={false}
         onError={(error) => {
           console.error('Camera error:', error);
           ToastAndroid.show('Camera error occurred', ToastAndroid.SHORT);
@@ -241,15 +242,7 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
 
       {/* Control buttons */}
       <View style={styles.controlContainer}>
-        {isRecording ? (
-          <TouchableOpacity
-            style={styles.stopButton}
-            onPress={stopRecording}
-          >
-            <Icon name="stop" size={30} color="white" />
-            <Text style={styles.stopButtonText}>STOP</Text>
-          </TouchableOpacity>
-        ) : (
+        {!isRecording && (
           <TouchableOpacity
             style={styles.recordButton}
             onPress={startRecording}

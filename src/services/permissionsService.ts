@@ -4,6 +4,7 @@ import { Platform, ToastAndroid } from 'react-native';
 /**
  * Request all required permissions at app startup
  * Called after successful login
+ * Requests permissions SEQUENTIALLY (one by one) to ensure all dialogs show
  */
 export const requestAllPermissions = async () => {
   try {
@@ -23,19 +24,23 @@ export const requestAllPermissions = async () => {
       ],
     }) || [];
 
-    console.log('[Permissions] Requesting:', permissions);
+    console.log('[Permissions] Requesting sequentially:', permissions.length, 'permissions');
 
-    // Request all permissions in parallel
-    const results = await Promise.all(
-      permissions.map(permission => request(permission))
-    );
+    // Request permissions SEQUENTIALLY (one by one) instead of in parallel
+    const results = [];
+    for (let i = 0; i < permissions.length; i++) {
+      console.log(`[Permissions] Requesting permission ${i + 1}/${permissions.length}`);
+      const result = await request(permissions[i]);
+      results.push(result);
+      console.log(`[Permissions] Permission ${i + 1} result:`, result);
+    }
 
-    console.log('[Permissions] Results:', results);
+    console.log('[Permissions] All permissions requested. Results:', results);
 
     // Check if critical permissions were granted
     const cameraGranted = results[0] === RESULTS.GRANTED;
     const microphoneGranted = results[1] === RESULTS.GRANTED;
-    const locationGranted = results[2] === RESULTS.GRANTED;
+    const locationGranted = results[2] === RESULTS.GRANTED || results[3] === RESULTS.GRANTED;
 
     if (!cameraGranted) {
       ToastAndroid.show('Camera permission required for photo capture', ToastAndroid.LONG);
@@ -47,6 +52,12 @@ export const requestAllPermissions = async () => {
       ToastAndroid.show('Location permission required for geotagging', ToastAndroid.LONG);
     }
 
+    console.log('[Permissions] Final status:', {
+      cameraGranted,
+      microphoneGranted,
+      locationGranted,
+    });
+
     return {
       cameraGranted,
       microphoneGranted,
@@ -57,6 +68,7 @@ export const requestAllPermissions = async () => {
     console.error('[Permissions] Error requesting permissions:', error);
     return {
       cameraGranted: false,
+      microphoneGranted: false,
       locationGranted: false,
       allGranted: false,
     };

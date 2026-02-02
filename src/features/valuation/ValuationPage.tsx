@@ -20,8 +20,82 @@ import { AppStepListDataRecord } from "./types";
 import { submitLeadReportApi } from "./api/valuation.api";
 import useQuestions from "../../services/useQuestions";
 import { Lead } from "../../types/leads";
+import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 
 // ============ STATIC DATA (REMOVED - Replaced by Store) ============
+
+// ============ ICON MAPPING FOR CARDS ============
+const getCardIcon = (cardName: string): { name: string; color: string } => {
+  const normalizedName = cardName?.toLowerCase().trim() || '';
+  
+  // Odometer
+  if (normalizedName.includes('odmeter') || normalizedName.includes('odometer')) 
+    return { name: 'counter', color: '#FF6B6B' };
+  
+  // Dashboard & Interior
+  if (normalizedName.includes('dashboard')) 
+    return { name: 'view-dashboard', color: '#4ECDC4' };
+  if (normalizedName.includes('interior back')) 
+    return { name: 'car-seat', color: '#95E1D3' };
+  if (normalizedName.includes('interior')) 
+    return { name: 'car-door', color: '#45B7D1' };
+  
+  // Engine
+  if (normalizedName.includes('engine')) 
+    return { name: 'engine', color: '#F38181' };
+  
+  // Chassis
+  if (normalizedName.includes('chassis imprint')) 
+    return { name: 'stamper', color: '#AA96DA' };
+  if (normalizedName.includes('chassis plate')) 
+    return { name: 'card-text', color: '#FCBAD3' };
+  if (normalizedName.includes('chassis')) 
+    return { name: 'barcode', color: '#A8E6CF' };
+  
+  // Vehicle Sides
+  if (normalizedName.includes('front side')) 
+    return { name: 'arrow-up-circle', color: '#4A90E2' };
+  if (normalizedName.includes('right side')) 
+    return { name: 'arrow-right-circle', color: '#50C878' };
+  if (normalizedName.includes('back side') || normalizedName.includes('rear')) 
+    return { name: 'arrow-down-circle', color: '#FFB347' };
+  if (normalizedName.includes('left side')) 
+    return { name: 'arrow-left-circle', color: '#FF6F91' };
+  
+  // Tyres
+  if (normalizedName.includes('front right tyre')) 
+    return { name: 'car-tire-alert', color: '#5DADE2' };
+  if (normalizedName.includes('rear right tyre')) 
+    return { name: 'car-tire-alert', color: '#AF7AC5' };
+  if (normalizedName.includes('rear left tyre')) 
+    return { name: 'car-tire-alert', color: '#F39C12' };
+  if (normalizedName.includes('front left tyre')) 
+    return { name: 'car-tire-alert', color: '#52BE80' };
+  if (normalizedName.includes('tyre') || normalizedName.includes('tire')) 
+    return { name: 'car-tire-alert', color: '#566573' };
+  
+  // Selfie & RC
+  if (normalizedName.includes('selfie')) 
+    return { name: 'camera-account', color: '#E74C3C' };
+  if (normalizedName.includes('rc front')) 
+    return { name: 'file-document', color: '#3498DB' };
+  if (normalizedName.includes('rc back')) 
+    return { name: 'file-document-outline', color: '#9B59B6' };
+  if (normalizedName.includes('rc')) 
+    return { name: 'file-certificate', color: '#1ABC9C' };
+  
+  // Optional & Information
+  if (normalizedName.includes('optional')) 
+    return { name: 'camera-plus', color: '#95A5A6' };
+  if (normalizedName.includes('information') || normalizedName.includes('record')) 
+    return { name: 'clipboard-text', color: '#34495E' };
+  
+  // Video
+  if (normalizedName.includes('video')) 
+    return { name: 'video', color: '#E67E22' };
+  
+  return { name: 'camera', color: '#7F8C8D' }; // Default camera icon
+};
 
 // ============ COMPONENTS ============
 
@@ -409,7 +483,12 @@ const ValuateCard = ({
           resizeMode="cover"
         />
       ) : (
-        <RNText style={styles.cardEmoji}>🚗</RNText>
+        <MaterialCommunityIcons
+          name={getCardIcon(text).name}
+          size={40}
+          color={getCardIcon(text).color}
+          style={styles.cardIcon}
+        />
       )}
       <RNText style={styles.cardText}>{text}</RNText>
     </TouchableOpacity>
@@ -553,7 +632,7 @@ const ValuationPage = () => {
                 <TouchableOpacity
                   style={[
                     styles.videoCard,
-                    isVideoRecorded && styles.videoCardCompleted,
+                    isVideoRecorded() && styles.videoCardCompleted,
                   ]}
                   onPress={HandleVideoNavigation}
                   activeOpacity={0.7}
@@ -803,8 +882,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 8,
   },
-  cardEmoji: {
-    fontSize: 40,
+  cardIcon: {
     marginBottom: 8,
   },
   uploadingText: {

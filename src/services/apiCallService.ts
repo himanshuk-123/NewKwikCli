@@ -8,11 +8,13 @@ import { replace } from './navigationService';
  */
 const client = axios.create({
   baseURL: 'https://inspection.kwikcheck.in/', // Hardcoded for now as per analysis
-  timeout: 30000,
+  timeout: 60000, // Increased to 60s for large video uploads
   headers: {
     'Content-Type': 'application/json',
     'Version': '2',
   },
+  maxBodyLength: Infinity,
+  maxContentLength: Infinity,
 });
 
 /* Request Interceptor to add Token */
