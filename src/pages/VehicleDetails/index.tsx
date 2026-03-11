@@ -571,7 +571,7 @@ const VehicleDetails = ({ route }: { route: any }) => {
           </View>
           <TouchableOpacity
             style={[styles.fetchVahanBtn, isFetchingVahan && styles.fetchVahanBtnDisabled]}
-            onPress={FetchVahan}
+            // onPress={FetchVahan}
             disabled={isFetchingVahan}
             activeOpacity={0.7}
           >

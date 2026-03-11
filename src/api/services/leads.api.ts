@@ -1,5 +1,5 @@
 import client from '../client';
-import { LeadsListResponse, LeadListParams, LEAD_STATUS_ID_MAP, LeadDetailResponse } from '@src/types/leads';
+import { LeadsListResponse, LeadListParams, LEAD_STATUS_ID_MAP, LeadDetailResponse } from '../../types/leads';
 
 /**
  * Pure API service layer for leads endpoints.

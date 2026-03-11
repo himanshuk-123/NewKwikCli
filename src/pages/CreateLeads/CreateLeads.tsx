@@ -25,6 +25,7 @@ interface CustomInputProps {
   placeholder: string;
   value: string;
   onChangeText: (value: string) => void;
+  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
 }
 
 const CustomInput = ({
@@ -33,6 +34,7 @@ const CustomInput = ({
   placeholder,
   value,
   onChangeText,
+  autoCapitalize = 'none',
 }: CustomInputProps) => {
   return (
     <TextInput
@@ -43,6 +45,7 @@ const CustomInput = ({
       onChangeText={onChangeText}
       keyboardType={isNumeric ? "numeric" : "default"}
       maxLength={maxLength}
+      autoCapitalize={autoCapitalize}
     />
   );
 };
@@ -186,10 +189,32 @@ const CreateLeads = () => {
   // Submit Handler
   const HandleSubmit = () => {
     const isRepo = formData.vehicleType.toLowerCase() === "repo";
+    
+    // Validate mandatory fields
     if (!formData.clientName || !formData.vehicleType || !formData.registrationNumber || !formData.customerName || !formData.customerMobile) {
       ToastAndroid.show("Please fill mandatory fields", ToastAndroid.SHORT);
       return;
     }
+
+    // Validate registration number format (should have at least 2 letters + digits)
+    if (formData.registrationNumber.length < 8) {
+      ToastAndroid.show("Invalid Registration Number", ToastAndroid.SHORT);
+      return;
+    }
+
+    // Validate mobile number - must be exactly 10 digits
+    if (formData.customerMobile.length !== 10) {
+      ToastAndroid.show("Mobile number must be 10 digits", ToastAndroid.SHORT);
+      return;
+    }
+
+    // Validate first digit of mobile (typically 6-9 in India)
+    const firstDigit = parseInt(formData.customerMobile[0]);
+    if (firstDigit < 6) {
+      ToastAndroid.show("Mobile number should start with 6-9", ToastAndroid.SHORT);
+      return;
+    }
+
     if (isRepo && (!formData.yardName || !formData.chassisNo)) {
       ToastAndroid.show("Yard Name and Chassis No are required for Repo", ToastAndroid.SHORT);
       return;
@@ -277,7 +302,12 @@ const CreateLeads = () => {
           placeholder="Registration Number"
           value={formData.registrationNumber}
           maxLength={11}
-          onChangeText={(value) => setField("registrationNumber", value)}
+          autoCapitalize="characters"
+          onChangeText={(value) => {
+            // Convert to uppercase for vehicle registration
+            const upperCaseValue = value.toUpperCase();
+            setField("registrationNumber", upperCaseValue);
+          }}
         />
 
         {/* Chassis Number (Repo Only) */}
@@ -287,7 +317,11 @@ const CreateLeads = () => {
             <CustomInput
               placeholder="Chassis Number"
               value={formData.chassisNo}
-              onChangeText={(value) => setField("chassisNo", value)}
+              autoCapitalize="characters"
+              onChangeText={(value) => {
+                const upperCaseValue = value.toUpperCase();
+                setField("chassisNo", upperCaseValue);
+              }}
             />
           </>
         )}
@@ -298,7 +332,11 @@ const CreateLeads = () => {
         <CustomInput
           placeholder="Prospect Number"
           value={formData.prospectNumber}
-          onChangeText={(value) => setField("prospectNumber", value)}
+          autoCapitalize="characters"
+          onChangeText={(value) => {
+            const upperCaseValue = value.toUpperCase();
+            setField("prospectNumber", upperCaseValue);
+          }}
         />
 
         <View style={styles.spacer} />
@@ -307,7 +345,11 @@ const CreateLeads = () => {
         <CustomInput
           placeholder="Customer Name"
           value={formData.customerName}
-          onChangeText={(value) => setField("customerName", value)}
+          autoCapitalize="words"
+          onChangeText={(value) => {
+            const upperCaseValue = value.toUpperCase();
+            setField("customerName", upperCaseValue);
+          }}
         />
 
         <View style={styles.spacer} />
@@ -318,7 +360,20 @@ const CreateLeads = () => {
           maxLength={10}
           placeholder="Customer Mobile Number"
           value={formData.customerMobile}
-          onChangeText={(value) => setField("customerMobile", value)}
+          onChangeText={(value) => {
+            // Only allow digits, max 10 digits
+            const numericValue = value.replace(/[^0-9]/g, '').slice(0, 10);
+            
+            // Validate 10 digits when user finishes typing
+            if (numericValue.length === 10) {
+              // Valid 10 digit number
+              setField("customerMobile", numericValue);
+            } else if (numericValue.length < 10) {
+              // Still typing, allow it
+              setField("customerMobile", numericValue);
+            }
+            // Ignore if more than 10 digits (maxLength also prevents this)
+          }}
         />
 
         <View style={styles.spacer} />
@@ -385,7 +440,11 @@ const CreateLeads = () => {
               placeholder="Customer Address"
               placeholderTextColor="#999"
               value={formData.customerAddress}
-              onChangeText={(value) => setField("customerAddress", value)}
+              onChangeText={(value) => {
+                const upperCaseValue = value.toUpperCase();
+                setField("customerAddress", upperCaseValue);
+              }}
+              autoCapitalize="characters"
               multiline
               numberOfLines={4}
             />

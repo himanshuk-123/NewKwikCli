@@ -12,11 +12,16 @@ import {
   Camera,
   useCameraDevice,
   useCameraPermission,
+  useCameraFormat,
 } from 'react-native-vision-camera';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import { uploadValuationVideoApi } from '../features/valuation/api/valuation.api';
+import Orientation from 'react-native-orientation-locker';
+import RNFS from 'react-native-fs';
 import { useValuationStore } from '../features/valuation/store/valuation.store';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getLocationAsync } from '../utils/geolocation';
+import { uploadQueueManager } from '../services/uploadQueue.manager';
+import { saveVideoLocally } from '../utils/imageHandler';
+import { upsertCapturedMedia } from '../database/valuationProgress.db';
 
 interface VideoCameraProps {
   route?: any;
@@ -25,16 +30,25 @@ interface VideoCameraProps {
 const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
   const cameraRef = useRef<Camera>(null);
   const navigation = useNavigation<any>();
-  const { markSideAsUploaded } = useValuationStore();
+  const { markLocalCaptured } = useValuationStore();
 
   const { id, side, vehicleType } = route?.params || {};
 
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('back');
 
+  // SELECT LOWER RESOLUTION FORMAT (Approx 480p - 720p to keep size small)
+  // FIX: Prefer 'yuv' pixel format to avoid black screen issues on some players
+  const format = useCameraFormat(device, [
+    { videoResolution: { width: 640, height: 480 } },
+    { pixelFormat: 'yuv' },
+    { fps: 30 }
+  ]);
+
   const [isRecording, setIsRecording] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(true);
   const [timer, setTimer] = useState(0);
+  const [isTorchOn, setIsTorchOn] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const MAX_DURATION = 60; // 1 minute
@@ -45,6 +59,17 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
       requestPermission();
     }
   }, [hasPermission, requestPermission]);
+
+  /* ---------- LOCK LANDSCAPE ORIENTATION FOR VIDEO ---------- */
+  useEffect(() => {
+    // Lock to landscape orientation for video recording
+    Orientation.lockToLandscape();
+
+    return () => {
+      // Explicitly lock back to portrait when navigating away
+      Orientation.lockToPortrait();
+    };
+  }, []);
 
   /* ---------- CAMERA LIFECYCLE ---------- */
   useEffect(() => {
@@ -88,20 +113,68 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
     };
   }, [isRecording]);
 
-  /* ---------- UPLOAD TO API (BACKGROUND) ---------- */
-  const uploadVideoInBackground = async (videoPath: string) => {
+  /* ---------- QUEUE VIDEO FOR UPLOAD ---------- */
+  const queueVideoForUpload = async (videoPath: string) => {
     try {
-      console.log('[VideoUpload] Starting video upload:', { videoPath, id });
+      console.log('[UploadQueue] Adding video to queue:', { videoPath, id });
 
-      // Call API
-      const response = await uploadValuationVideoApi(videoPath, id.toString());
+      // FIX: Verify file exists before queuing
+      const filePath = videoPath.startsWith('file://') ? videoPath.replace('file://', '') : videoPath;
+      const fileExists = await RNFS.exists(filePath);
 
-      console.log('[VideoUpload] Success:', response);
-      ToastAndroid.show('Video uploaded successfully!', ToastAndroid.LONG);
+      if (!fileExists) {
+        throw new Error(`Video file was deleted before queuing: ${filePath}`);
+      }
+
+      // Get file size to warn user about large videos (Cloudflare limit is 100MB)
+      try {
+        const fileInfo = await RNFS.stat(filePath);
+        const fileSizeMB = fileInfo.size / (1024 * 1024);
+        console.log('[VideoCamera] Video file size:', `${fileSizeMB.toFixed(2)}MB`);
+
+        if (fileSizeMB > 100) {
+          throw new Error(
+            `Video is too large: ${fileSizeMB.toFixed(2)}MB\n\n` +
+            `Maximum allowed: 100MB\n` +
+            `Please record a shorter video or use lower quality.`
+          );
+        }
+
+        if (fileSizeMB > 50) {
+          ToastAndroid.show(
+            `⚠️ Large video (${fileSizeMB.toFixed(1)}MB) - upload may take a while`,
+            ToastAndroid.LONG
+          );
+        }
+      } catch (error: any) {
+        if (error.message.includes('too large') || error.message.includes('Maximum allowed')) throw error;
+        console.warn('[VideoCamera] Could not verify file size:', error?.message);
+      }
+
+      // Get geolocation
+      const location = await getLocationAsync();
+      const geo = {
+        lat: location?.lat || '0',
+        long: location?.long || '0',
+        timeStamp: new Date().toISOString(),
+      };
+
+      // Add to upload queue (db manager with SQLite + retry logic)
+      const queueId = await uploadQueueManager.addToQueue({
+        type: 'video',
+        leadId: id.toString(),
+        paramName: 'Video1',
+        vehicleType: vehicleType || '',
+        fileUri: videoPath,
+        geo,
+      });
+
+      console.log('[UploadQueue] Video queued with ID:', queueId);
+      ToastAndroid.show('✓ Video queued for upload', ToastAndroid.SHORT);
     } catch (error: any) {
-      console.error('[VideoUpload] Failed:', error?.message || error);
+      console.error('[UploadQueue] Failed to queue video:', error);
       ToastAndroid.show(
-        error?.message || 'Failed to upload video. Please retry.',
+        error?.message || 'Failed to queue video. Please retry.',
         ToastAndroid.LONG
       );
     }
@@ -115,24 +188,35 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
         throw new Error('No video path provided');
       }
 
-      console.log('[VideoCamera] Video recorded:', videoPath);
+      console.log('[VideoCamera] Video recorded (temporary path):', videoPath);
 
-      // Mark side as uploaded in store (for UI display)
-      markSideAsUploaded(side || 'Video', videoPath);
+      // Turn off torch after recording
+      setIsTorchOn(false);
 
-      // Show uploading message
-      ToastAndroid.show('Video recorded! Navigating...', ToastAndroid.SHORT);
+      // 1️⃣ Save video to persistent storage (CRITICAL - vision-camera uses temp storage)
+      const savedVideoUri = await saveVideoLocally(videoPath, id);
+      if (!savedVideoUri) {
+        throw new Error('Failed to save video to persistent storage');
+      }
 
-      // Navigate back immediately (same as CustomCamera)
-      // Use setTimeout to ensure state updates complete
+      console.log('[VideoCamera] Video saved to persistent storage:', savedVideoUri);
+
+      // 2️⃣ Update UI immediately with saved video (LOCAL truth)
+      markLocalCaptured(side || 'Video', savedVideoUri);
+
+      // 2.1️⃣ Persist local video URI for restore on revisit
+      await upsertCapturedMedia(id.toString(), side || 'Video', savedVideoUri);
+
+      // 3️⃣ Queue for background upload (works online or offline)
+      await queueVideoForUpload(savedVideoUri);
+
+      // Lock to portrait before navigating back
+      Orientation.lockToPortrait();
+
+      // Navigate back immediately
       setTimeout(() => {
         navigation.goBack();
       }, 500);
-
-      // Upload in background with proper error handling
-      uploadVideoInBackground(videoPath).catch((error: any) => {
-        console.error('[VideoCamera] Background upload error:', error);
-      });
     } catch (error) {
       console.error('Error handling video:', error);
       ToastAndroid.show(
@@ -140,7 +224,7 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
         ToastAndroid.LONG
       );
     }
-  }, [navigation, id, side, markSideAsUploaded]);
+  }, [navigation, id, side, markLocalCaptured, queueVideoForUpload]);
 
   const stopRecording = useCallback(async () => {
     try {
@@ -166,9 +250,10 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
     try {
       setIsRecording(true);
       await cameraRef.current.startRecording({
-        flash: 'off',
+        flash: 'off', // Don't use flash for recording, use torch instead
+        fileType: 'mp4', // Explicitly use MP4 container
         videoCodec: 'h264',
-        videoBitRate: 'normal',
+        // Note: bitrate is controlled by format on <Camera> in v3/v4
         onRecordingFinished: (video: any) => {
           handleVideoRecorded(video);
         },
@@ -211,9 +296,11 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
         ref={cameraRef}
         style={styles.camera}
         device={device}
+        format={format} // Apply 480p format
         isActive={isCameraActive}
         video={true}
         audio={true}
+        torch={isTorchOn ? 'on' : 'off'}
         videoStabilizationMode="standard"
         videoHdr={false}
         lowLightBoost={false}
@@ -226,7 +313,10 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
       {/* Close button */}
       <TouchableOpacity
         style={styles.closeButton}
-        onPress={() => navigation.goBack()}
+        onPress={() => {
+          Orientation.lockToPortrait();
+          navigation.goBack();
+        }}
       >
         <Icon name="close" size={28} color="white" />
       </TouchableOpacity>
@@ -239,6 +329,20 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
           </Text>
         </View>
       )}
+
+      {/* Flash/Torch button */}
+      <TouchableOpacity
+        style={[styles.flashButton, isTorchOn && styles.flashButtonActive]}
+        onPress={() => {
+          setIsTorchOn(!isTorchOn);
+          ToastAndroid.show(
+            !isTorchOn ? 'Flashlight ON' : 'Flashlight OFF',
+            ToastAndroid.SHORT
+          );
+        }}
+      >
+        <Icon name={isTorchOn ? 'flash-on' : 'flash-off'} size={24} color="#fff" />
+      </TouchableOpacity>
 
       {/* Control buttons */}
       <View style={styles.controlContainer}>
@@ -257,6 +361,8 @@ const VideoCamera: React.FC<VideoCameraProps> = ({ route }) => {
     </View>
   );
 };
+
+export default VideoCamera;
 
 const styles = StyleSheet.create({
   container: {
@@ -280,6 +386,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 10,
+  },
+  flashButton: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  flashButtonActive: {
+    backgroundColor: 'rgba(255,200,0,0.8)',
   },
   timerContainer: {
     position: 'absolute',

@@ -2,19 +2,30 @@ import { create } from 'zustand';
 import { AppStepListDataRecord } from '../types';
 import { fetchAppStepListApi } from '../api/valuation.api';
 
-interface UploadedSideData {
+export type UploadStatus =
+  | 'pending'
+  | 'uploading'
+  | 'uploaded'
+  | 'failed';
+
+interface SideUploadState {
   side: string;
-  imgUri: string; // Local file URI from camera
+  localUri: string;
+  status: UploadStatus;
 }
 
 interface ValuationState {
   steps: AppStepListDataRecord[];
   isLoading: boolean;
   error: string | null;
-  uploadedSides: UploadedSideData[]; // Array of uploaded sides with image URIs
+
+  sideUploads: SideUploadState[];
+
   fetchSteps: (leadId: string) => Promise<void>;
-  markSideAsUploaded: (side: string, imgUri: string) => void;
-  getSideImage: (side: string) => string | null;
+  markLocalCaptured: (side: string, localUri: string) => void;
+  updateUploadStatus: (side: string, status: UploadStatus) => void;
+  getSideUpload: (side: string) => SideUploadState | undefined;
+
   reset: () => void;
 }
 
@@ -22,38 +33,80 @@ export const useValuationStore = create<ValuationState>((set, get) => ({
   steps: [],
   isLoading: false,
   error: null,
-  uploadedSides: [],
+  sideUploads: [],
+
+  /* ===================== API ===================== */
 
   fetchSteps: async (leadId: string) => {
-    set({ isLoading: true, error: null, steps: [] });
+    set({ isLoading: true, error: null });
     try {
       const data = await fetchAppStepListApi(leadId);
       set({ steps: data, isLoading: false });
-    } catch (error: any) {
-      set({ error: error.message || 'Failed to fetch steps', isLoading: false });
+    } catch (e: any) {
+      set({ error: e?.message || 'Failed to fetch steps', isLoading: false });
     }
   },
 
-  markSideAsUploaded: (side: string, imgUri: string) => {
+  /* ===================== LOCAL CAPTURE ===================== */
+
+  markLocalCaptured: (side, localUri) => {
+    console.log('[Store] markLocalCaptured called:', { side, localUri });
     set(state => {
-      // Check if side already exists and update it, otherwise add it
-      const existing = state.uploadedSides.findIndex(item => item.side === side);
-      if (existing !== -1) {
-        const updated = [...state.uploadedSides];
-        updated[existing] = { side, imgUri };
-        return { uploadedSides: updated };
+      const existingIndex = state.sideUploads.findIndex(s => s.side === side);
+      if (existingIndex !== -1) {
+        console.log('[Store] Updating existing side and moving to end:', side);
+        // Remove from current position
+        const updatedItem = {
+          ...state.sideUploads[existingIndex],
+          localUri,
+          status: 'pending' as UploadStatus,
+        };
+        const newUploads = [
+          ...state.sideUploads.slice(0, existingIndex),
+          ...state.sideUploads.slice(existingIndex + 1),
+          updatedItem,  // Add to end
+        ];
+        console.log('[Store] Moved to end, last item is now:', newUploads[newUploads.length - 1]?.side);
+        return { sideUploads: newUploads };
       }
-      return { uploadedSides: [...state.uploadedSides, { side, imgUri }] };
+      console.log('[Store] Adding new side:', side);
+      const newUploads = [
+        ...state.sideUploads,
+        { side, localUri, status: 'pending' },
+      ];
+      console.log('[Store] New sideUploads array, last item:', newUploads[newUploads.length - 1]?.side);
+      return {
+        sideUploads: newUploads,
+      };
     });
   },
 
-  getSideImage: (side: string) => {
-    const state = get();
-    const found = state.uploadedSides.find(item => item.side === side);
-    return found?.imgUri || null;
+  /* ===================== UPLOAD STATUS ===================== */
+
+  updateUploadStatus: (side, status) => {
+    set(state => {
+      const existing = state.sideUploads.find(s => s.side === side);
+      if (!existing) return state;
+
+      existing.status = status;
+      return { sideUploads: [...state.sideUploads] };
+    });
   },
 
+  /* ===================== SELECTORS ===================== */
+
+  getSideUpload: side => {
+    return get().sideUploads.find(s => s.side === side);
+  },
+
+  /* ===================== RESET ===================== */
+
   reset: () => {
-    set({ steps: [], isLoading: false, error: null, uploadedSides: [] });
-  }
+    set({
+      steps: [],
+      isLoading: false,
+      error: null,
+      sideUploads: [],
+    });
+  },
 }));

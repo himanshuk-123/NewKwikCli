@@ -7,7 +7,7 @@ import { replace } from './navigationService';
  * Base Axios Client for KwikCheck
  */
 const client = axios.create({
-  baseURL: 'https://inspection.kwikcheck.in/', // Hardcoded for now as per analysis
+  baseURL: 'https://uat.kwikcheck.in/', // Hardcoded for now as per analysis
   timeout: 60000, // Increased to 60s for large video uploads
   headers: {
     'Content-Type': 'application/json',
@@ -93,17 +93,27 @@ const handleTokenExpiration = async () => {
  * API Call Service Wrapper
  * Matches the structure expected by login.api.ts (and future migrations)
  */
-const apiCallService = {
-  post: async (request: { service: string; body: any; headers?: any }) => {
+const   apiCallService = {
+  post: async (request: {
+    service: string;
+    body: any;
+    headers?: any;
+    timeout?: number;
+    maxBodyLength?: number;
+    maxContentLength?: number;
+  }) => {
     try {
       const config = {
         headers: {
-          ...request.headers
-        }
+          ...request.headers,
+        },
+        timeout: request.timeout,
+        maxBodyLength: request.maxBodyLength,
+        maxContentLength: request.maxContentLength,
       };
 
       const response = await client.post(request.service, request.body, config);
-      console.log(`Response from ${request.service}: `, response.data)
+      console.log(`Response from ${request.service}: `, response.data);
       return response.data;
     } catch (error: any) {
       // Return the error response data if available, to let caller handle 'ERROR' fields

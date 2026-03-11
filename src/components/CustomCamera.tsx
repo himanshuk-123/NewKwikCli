@@ -15,25 +15,26 @@ import {
   useCameraPermission,
 } from "react-native-vision-camera";
 import AntDesign from "react-native-vector-icons/AntDesign";
-import { uploadValuationImageApi } from "../features/valuation/api/valuation.api";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import Orientation from "react-native-orientation-locker";
+import RNFS from "react-native-fs";
 import { getLocationAsync } from "../utils/geolocation";
 import { saveImageLocally } from "../utils/imageHandler";
-import RNFS from "react-native-fs";
 import { useValuationStore } from "../features/valuation/store/valuation.store";
+import { uploadQueueManager } from "../services/uploadQueue.manager";
+import { upsertCapturedMedia } from "../database/valuationProgress.db";
 
 const CustomCamera = ({ route }: { route: any }) => {
   const cameraRef = useRef<Camera>(null);
   const navigation = useNavigation<any>();
-  const { markSideAsUploaded } = useValuationStore();
+  const { markLocalCaptured, steps } = useValuationStore();
 
   // Get params from navigation
   const { id, side, vehicleType, appColumn } = route.params || {};
 
   // Determine if this is a selfie/valuator shot based on side name
-  const isSelfie = side?.toLowerCase().includes("selfie") || 
-                   side?.toLowerCase().includes("valuator") ||
-                   side?.toLowerCase().includes("user with");
+  const isSelfie = side?.toLowerCase().includes("selfie") ||
+    side?.toLowerCase().includes("valuator") ||
+    side?.toLowerCase().includes("user with");
   const cameraFacing = isSelfie ? "front" : "back";
   const device = useCameraDevice(cameraFacing);
   const { hasPermission, requestPermission } = useCameraPermission();
@@ -47,6 +48,17 @@ const CustomCamera = ({ route }: { route: any }) => {
   useEffect(() => {
     if (!hasPermission) requestPermission();
   }, [hasPermission]);
+
+  /* ---------- LOCK PORTRAIT ORIENTATION ---------- */
+  useEffect(() => {
+    // Lock to portrait orientation
+    Orientation.lockToPortrait();
+
+    return () => {
+      // Unlock on unmount
+      Orientation.unlockAllOrientations();
+    };
+  }, []);
 
   /* ---------- CAMERA LIFECYCLE ---------- */
   useEffect(() => {
@@ -97,57 +109,49 @@ const CustomCamera = ({ route }: { route: any }) => {
     }
   };
 
-  /* ---------- UPLOAD TO API (BACKGROUND) ---------- */
-  const uploadImageInBackground = async (base64: string) => {
+  /* ---------- QUEUE IMAGE FOR UPLOAD ---------- */
+  const queueImageForUpload = async (imageUri: string) => {
     try {
-      // Get TOKENID from AsyncStorage
-      const userCreds = await AsyncStorage.getItem("user_credentials");
-      const tokenId = userCreds ? JSON.parse(userCreds)?.TOKENID : "";
-
-      if (!tokenId) {
-        throw new Error("User token not found. Please login again.");
-      }
-
       // Get geolocation
       const location = await getLocationAsync();
-      const geolocation = {
+      const geo = {
         lat: location?.lat || "0",
         long: location?.long || "0",
         timeStamp: new Date().toISOString(),
       };
 
-      // Determine parameter name (e.g., OdometerBase64, DashboardBase64)
-      const paramName = appColumn ? `${appColumn}Base64` : "OtherBase64";
+      // ⭐ SAME AS EXPO PRODUCTION APP - Get Appcolumn from server data
+      const step = steps.find(s => s.Name === side);
+      const rawParamName = step?.Appcolumn || appColumn || "Other";
 
-      console.log("[Upload] Starting image upload:", {
+      // Just append "Base64" - exactly like expo app!
+      const paramName = `${rawParamName}Base64`;
+
+      console.log("[UploadQueue] Adding to queue:", {
         side,
-        paramName,
+        appColumn: step?.Appcolumn,
+        rawParamName,
+        paramName, // e.g., "OdometerBase64", "FrontSideImageBase64"
         leadId: id,
         vehicleType,
-        base64Length: base64.length,
-        geolocation,
       });
 
-      // Call API
-      const response = await uploadValuationImageApi(
-        base64,
+      // Add to upload queue (db manager with SQLite + retry logic)
+      const queueId = await uploadQueueManager.addToQueue({
+        type: 'image',
+        fileUri: imageUri,
+        leadId: id,
         paramName,
-        id,
-        vehicleType,
-        geolocation
-      );
+        vehicleType: vehicleType || '',
+        geo,
+      });
 
-      // Check response for errors
-      if (response?.ERROR && response.ERROR !== "0") {
-        throw new Error(response?.MESSAGE || "API returned an error");
-      }
-
-      console.log("[Upload] Success:", response);
-      ToastAndroid.show("Image uploaded successfully!", ToastAndroid.SHORT);
+      console.log("[UploadQueue] Queued with ID:", queueId);
+      ToastAndroid.show(`✓ ${side} queued for upload`, ToastAndroid.SHORT);
     } catch (error: any) {
-      console.error("[Upload] Failed:", error);
+      console.error("[UploadQueue] Failed to queue:", error);
       ToastAndroid.show(
-        error?.message || "Failed to upload image. Please retry.",
+        error?.message || "Failed to queue image. Please retry.",
         ToastAndroid.LONG
       );
     }
@@ -157,37 +161,38 @@ const CustomCamera = ({ route }: { route: any }) => {
   const handleProceed = async () => {
     if (!imageUri) return;
 
+    console.log('[CustomCamera] handleProceed START:', { side, leadId: id });
+
     try {
       setIsUploading(true);
 
-      // Save image locally first (for immediate UI feedback)
+      // 1️⃣ Save image locally (permanent storage)
       const savedImageUri = await saveImageLocally(imageUri, id, side);
       if (!savedImageUri) {
         throw new Error("Failed to save image locally");
       }
 
-      console.log("[Upload] Image saved locally:", savedImageUri);
+      console.log("[CustomCamera] Image saved locally:", savedImageUri);
 
-      // Mark side as uploaded with the saved image URI (for UI display)
-      markSideAsUploaded(side, savedImageUri);
+      // 2️⃣ Update UI immediately with saved image (LOCAL truth)
+      console.log("[CustomCamera] Calling markLocalCaptured:", { side, savedImageUri });
+      markLocalCaptured(side, savedImageUri);
 
-      // Navigate back immediately so modal can show
+      // 2.1️⃣ Persist local image URI for restore on revisit
+      await upsertCapturedMedia(id.toString(), side, savedImageUri);
+      console.log("[CustomCamera] Saved to database");
+
+      // 3️⃣ Queue for background upload (works online or offline)
+      await queueImageForUpload(savedImageUri);
+      console.log("[CustomCamera] Queued for upload");
+
+      // 4️⃣ Navigate back immediately
+      console.log("[CustomCamera] Navigating back to ValuationPage");
       setIsUploading(false);
       navigation.goBack();
 
-      // Upload in background
-      (async () => {
-        const base64 = await readAsBase64(imageUri);
-        if (!base64) {
-          throw new Error("Failed to convert image to base64");
-        }
-        await uploadImageInBackground(base64);
-      })().catch((error: any) => {
-        console.error("[Proceed] Background upload failed:", error);
-      });
-
     } catch (error: any) {
-      console.error("[Proceed] Failed:", error);
+      console.error("[CustomCamera] Failed:", error);
       ToastAndroid.show(
         error?.message || "Error processing image. Please retry.",
         ToastAndroid.LONG

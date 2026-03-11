@@ -6,71 +6,15 @@ import {
   TouchableOpacity,
   SafeAreaView,
   ToastAndroid,
+  ActivityIndicator,
+  RefreshControl,
 } from "react-native";
-import React from "react";
+import React, { useState } from "react";
 import { COLORS } from "../../constants/Colors";
 import { useNavigation } from "@react-navigation/native";
+import { useValuationLeads } from "../../hooks/useValuationLeads";
 
-// ============ STATIC DATA ============
-const STATIC_VALUATED_LEADS = [
-  {
-    leadId: "KWC12345",
-    regNo: "MH12AB1234",
-    prospectNo: "LOAN123456",
-    uploaded_count: 5,
-    total_count: 8,
-    lastValuated: "2026-01-03",
-    vehicleType: "2W",
-  },
-  {
-    leadId: "KWC12346",
-    regNo: "DL01CD5678",
-    prospectNo: "LOAN789012",
-    uploaded_count: 8,
-    total_count: 8,
-    lastValuated: "2026-01-02",
-    vehicleType: "4W",
-  },
-  {
-    leadId: "KWC12347",
-    regNo: "KA03EF9012",
-    prospectNo: "LOAN345678",
-    uploaded_count: 3,
-    total_count: 8,
-    lastValuated: "2026-01-01",
-    vehicleType: "2W",
-  },
-]
-// ============ STATIC DATA ============
-const STATIC_VALUATED_LEADS2 = [
-  {
-    leadId: "KWC12345",
-    regNo: "MH12AB1234",
-    prospectNo: "LOAN123456",
-    uploaded_count: 5,
-    total_count: 8,
-    lastValuated: "2026-01-03",
-    vehicleType: "2W",
-  },
-  {
-    leadId: "KWC12346",
-    regNo: "DL01CD5678",
-    prospectNo: "LOAN789012",
-    uploaded_count: 8,
-    total_count: 8,
-    lastValuated: "2026-01-02",
-    vehicleType: "4W",
-  },
-  {
-    leadId: "KWC12347",
-    regNo: "KA03EF9012",
-    prospectNo: "LOAN345678",
-    uploaded_count: 3,
-    total_count: 8,
-    lastValuated: "2026-01-01",
-    vehicleType: "2W",
-  },
-];
+// ============ STATIC DATA - REMOVED (Now using dynamic data) ============
 
 // ============ HELPER FUNCTIONS ============
 const convertDateString = (dateString: string) => {
@@ -86,8 +30,9 @@ interface ValuationCardProps {
   leadId: string;
   regNo: string;
   prospectNo: string;
-  uploaded_count: number;
-  total_count: number;
+  uploadedCount: number;
+  totalCount: number;
+  uploadProgress: number;
   lastValuated: string;
   onUploadPress: () => void;
 }
@@ -96,12 +41,13 @@ const ValuationCard = ({
   leadId,
   regNo,
   prospectNo,
-  uploaded_count,
-  total_count,
+  uploadedCount,
+  totalCount,
+  uploadProgress,
   lastValuated,
   onUploadPress,
 }: ValuationCardProps) => {
-  const isPartiallyUploaded = total_count > uploaded_count;
+  const isPartiallyUploaded = totalCount > uploadedCount;
 
   return (
     <View style={styles.card}>
@@ -131,13 +77,30 @@ const ValuationCard = ({
         </View>
       </View>
 
+      {/* Progress Bar */}
+      <View style={styles.progressContainer}>
+        <View style={styles.progressBarBackground}>
+          <View
+            style={[
+              styles.progressBarFill,
+              { width: `${Math.min(uploadProgress, 100)}%` },
+            ]}
+          />
+        </View>
+        <Text style={styles.progressText}>{uploadProgress}% uploaded</Text>
+      </View>
+
       <View style={styles.cardFooter}>
         <View style={styles.uploadStatus}>
           <Text style={styles.uploadCount}>
-            {uploaded_count}/{total_count}{" "}
+            {uploadedCount}/{totalCount}{" "}
           </Text>
           <Text style={styles.uploadLabel}>UPLOADED</Text>
         </View>
+
+        <Text style={styles.remainingText}>
+          Left: {Math.max(totalCount - uploadedCount, 0)}
+        </Text>
 
         <TouchableOpacity
           style={styles.uploadButton}
@@ -157,46 +120,171 @@ const ValuationCard = ({
 
 export default function ValuatedLeads() {
   const navigation = useNavigation<any>();
+  const { leads, isLoading, error, refetch } = useValuationLeads();
+  const [refreshing, setRefreshing] = useState(false);
 
-  const handleUploadPress = (item: (typeof STATIC_VALUATED_LEADS)[0]) => {
-    const condition = item.total_count > item.uploaded_count;
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
+  };
 
-    if (condition) {
-      // Navigate to valuate screen for incomplete uploads
+  const handleUploadPress = async (item: any) => {
+    console.log('[ValuatedLeads] Attempting to navigate with item:', {
+      leadId: item.leadId,
+      regNo: item.regNo,
+      vehicleType: item.vehicleType,
+      uploadedCount: item.uploadedCount,
+      totalCount: item.totalCount,
+    });
+
+    // ✅ Safety check: Ensure required data exists
+    if (!item.leadId) {
+      console.error('[ValuatedLeads] Missing leadId, cannot navigate');
+      ToastAndroid.show("Error: Lead ID missing", ToastAndroid.SHORT);
+      return;
+    }
+
+    // Allow navigation even if vehicleType was not previously stored,
+    // but log it and fall back safely so the user is not blocked.
+    let vehicleType = item.vehicleType as string | undefined;
+    if (!vehicleType) {
+      console.warn('[ValuatedLeads] Missing vehicleType, falling back to default "2W" for lead:', item.leadId);
+      vehicleType = '2W';
       ToastAndroid.show(
-        "Navigating to valuation screen...",
+        "Vehicle type missing in history, using 2W as default",
         ToastAndroid.SHORT
       );
+    }
+
+    const condition = item.totalCount > item.uploadedCount;
+
+    if (condition) {
+      // Use regNo as displayId (like MyTasks does)
+      // If regNo is empty, use leadId as fallback
+      const displayId = item.regNo || item.leadId;
+
+      // ✅ IMPORTANT: Update database with regNo BEFORE navigation
+      // This ensures ValuatedLeads shows the same displayId as MyTask when they return
+      if (!item.regNo && displayId !== item.leadId) {
+        try {
+          const { updateLeadMetadata } = await import('../../database/valuationProgress.db');
+          await updateLeadMetadata(item.leadId, { regNo: displayId });
+          console.log('[ValuatedLeads] Updated regNo in database:', displayId);
+        } catch (error) {
+          console.warn('[ValuatedLeads] Failed to update regNo in database:', error);
+          // Continue anyway - navigation shouldn't be blocked by this
+        }
+      }
+
+      // Navigate to valuate screen for incomplete uploads
+      console.log('[ValuatedLeads] Navigating to Valuate screen:', {
+        leadId: item.leadId,
+        displayId,
+        vehicleType,
+      });
+      
+      ToastAndroid.show(
+        `Opening valuation for ${displayId}`,
+        ToastAndroid.SHORT
+      );
+      
+      // ✅ Pass correct parameter names, reusing the same route shape as MyTasks
       navigation.navigate("Valuate", {
-        id: item.leadId.toUpperCase(),
-        vehicleType: item.vehicleType,
+        leadId: item.leadId,
+        displayId,
+        vehicleType,
       });
     } else {
       // Show upload again message
-      ToastAndroid.show("All images already uploaded", ToastAndroid.SHORT);
+      console.log('[ValuatedLeads] All images uploaded for:', item.leadId);
+      ToastAndroid.show(
+        `${item.regNo || item.leadId}: All ${item.totalCount} images uploaded ✓`,
+        ToastAndroid.SHORT
+      );
     }
   };
 
+  // Show loading only on first load, not on refresh
+  if (isLoading && !refreshing && leads.length === 0) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color={COLORS.AppTheme.primary} />
+          <Text style={styles.loadingText}>Loading valuated leads...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centerContainer}>
+          <Text style={styles.errorText}>Error: {error}</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  console.log('[ValuatedLeads] Rendering:', {
+    leadsCount: leads.length,
+    isLoading,
+    error,
+    firstLead: leads[0] ? {
+      leadId: leads[0].leadId,
+      regNo: leads[0].regNo,
+      uploadedCount: leads[0].uploadedCount,
+      totalCount: leads[0].totalCount,
+    } : null,
+  });
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView style={styles.scrollView}>
+      <ScrollView 
+        style={styles.scrollView}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={[COLORS.AppTheme.primary]}
+            tintColor={COLORS.AppTheme.primary}
+          />
+        }
+      >
         <View style={styles.container}>
-          {STATIC_VALUATED_LEADS.length > 0 ? (
-            STATIC_VALUATED_LEADS.map((item) => (
-              <ValuationCard
-                key={item.leadId}
-                leadId={item.leadId}
-                regNo={item.regNo}
-                prospectNo={item.prospectNo}
-                uploaded_count={item.uploaded_count}
-                total_count={item.total_count}
-                lastValuated={item.lastValuated}
-                onUploadPress={() => handleUploadPress(item)}
-              />
-            ))
+          {leads.length > 0 ? (
+            <>
+              <View style={styles.headerContainer}>
+                <Text style={styles.headerText}>
+                  {leads.length} Valuated Vehicle{leads.length !== 1 ? 's' : ''}
+                </Text>
+                <Text style={styles.subHeaderText}>
+                  Pull down to refresh
+                </Text>
+              </View>
+              {leads.map((item) => (
+                <ValuationCard
+                  key={item.leadId}
+                  leadId={item.leadId}
+                  regNo={item.regNo}
+                  prospectNo={item.prospectNo}
+                  uploadedCount={item.uploadedCount}
+                  totalCount={item.totalCount}
+                  uploadProgress={item.uploadProgress}
+                  lastValuated={item.lastValuated}
+                  onUploadPress={() => handleUploadPress(item)}
+                />
+              ))}
+            </>
           ) : (
             <View style={styles.noDataContainer}>
-              <Text style={styles.noDataText}>No valuated leads found</Text>
+              <Text style={styles.noDataText}>
+                📋 No valuated leads yet
+              </Text>
+              <Text style={styles.noDataSubText}>
+                Start valuating a vehicle from "My Tasks" to see it here
+              </Text>
             </View>
           )}
         </View>
@@ -298,6 +386,11 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#000",
   },
+  remainingText: {
+    fontSize: 12,
+    color: "#666",
+    fontWeight: "500",
+  },
   uploadButton: {
     backgroundColor: COLORS.AppTheme.primary,
     paddingHorizontal: 20,
@@ -311,6 +404,42 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
   },
+  progressContainer: {
+    marginBottom: 12,
+    gap: 6,
+  },
+  progressBarBackground: {
+    height: 6,
+    backgroundColor: "#e5e7eb",
+    borderRadius: 3,
+    overflow: "hidden",
+  },
+  progressBarFill: {
+    height: "100%",
+    backgroundColor: COLORS.Dashboard.text.Green || "#10B981",
+    borderRadius: 3,
+  },
+  progressText: {
+    fontSize: 12,
+    color: "#666",
+    fontWeight: "500",
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    fontSize: 16,
+    color: "#666",
+    marginTop: 12,
+    fontWeight: "500",
+  },
+  errorText: {
+    fontSize: 16,
+    color: "#dc2626",
+    fontWeight: "600",
+  },
   noDataContainer: {
     flex: 1,
     justifyContent: "center",
@@ -318,8 +447,31 @@ const styles = StyleSheet.create({
     paddingVertical: 100,
   },
   noDataText: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "600",
+    color: "#666",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  noDataSubText: {
+    fontSize: 14,
     color: "#999",
+    textAlign: "center",
+    paddingHorizontal: 40,
+  },
+  headerContainer: {
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  headerText: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#000",
+    marginBottom: 4,
+  },
+  subHeaderText: {
+    fontSize: 13,
+    color: "#666",
+    fontWeight: "400",
   },
 });

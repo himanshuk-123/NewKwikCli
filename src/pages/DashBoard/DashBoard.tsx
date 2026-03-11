@@ -19,6 +19,7 @@ import { COLORS } from "../../constants/Colors";
 import { DRAWER_ROUTES_DISABLED_FOR_ROLEID } from "../../constants";
 import { useDashboardStore } from "../../features/dashboard/store/dashboard.store";
 import { useAuthStore } from "../../features/auth/store/auth.store";
+import { useValuatedLeadsCount } from "../../hooks/useValuatedLeadsCount";
 
 type DisplayProps = {
   value: number;
@@ -87,6 +88,7 @@ const Dashboard = () => {
   const { dashboardData, isLoading, fetchDashboardData } =
     useDashboardStore();
   const { user } = useAuthStore();
+  const { valuatedCount, refetch: refetchValuatedCount } = useValuatedLeadsCount();
 
   const roleId = Number(user?.roleId ?? -1);
   const [refreshing, setRefreshing] = useState(false);
@@ -104,6 +106,7 @@ const Dashboard = () => {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchDashboardData();
+      await refetchValuatedCount();
     setRefreshing(false);
   }, [fetchDashboardData]);
 
@@ -178,7 +181,7 @@ const Dashboard = () => {
 
         {!DRAWER_ROUTES_DISABLED_FOR_ROLEID.includes(roleId) && (
           <DisplayComponent
-            value={0}
+            value={valuatedCount}
             text="Valuated"
             icon="cameraswitch"
             color="Orange"

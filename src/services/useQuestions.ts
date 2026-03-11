@@ -82,8 +82,12 @@ const useQuestions = () => {
     if (!vehicleType || !nameInApplication) return null;
 
     // Find the matching step from backend data
+    // Use loose matching to handle casing/trimming issues
+    const normalize = (str: string) => str?.toLowerCase().trim() || '';
+    const targetName = normalize(nameInApplication);
+
     const questionData = data.find(
-      (item: any) => item.Name === nameInApplication
+      (item: any) => normalize(item.Name) === targetName
     );
 
     if (!questionData) return null;

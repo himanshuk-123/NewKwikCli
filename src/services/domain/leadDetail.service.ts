@@ -1,5 +1,5 @@
-import leadsApi from '@src/api/services/leads.api';
-import { Lead, LeadsError } from '@src/types/leads';
+import { leadsApi } from '../../api/services/leads.api';
+import { Lead, LeadsError } from '../../types/leads';
 
 /**
  * Domain service for lead detail.

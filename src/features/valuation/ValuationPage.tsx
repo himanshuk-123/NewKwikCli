@@ -9,11 +9,12 @@ import {
   Modal,
   TextInput,
   SafeAreaView,
+  Text
   ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { COLORS } from "../../constants/Colors";
 import { useValuationStore } from "./store/valuation.store";
 import { AppStepListDataRecord } from "./types";
@@ -21,80 +22,88 @@ import { submitLeadReportApi } from "./api/valuation.api";
 import useQuestions from "../../services/useQuestions";
 import { Lead } from "../../types/leads";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
+import UploadQueueStatus from "../../components/UploadQueueStatus";
+import { uploadQueueManager } from "../../services/uploadQueue.manager";
+import {
+  getCapturedMediaByLeadId,
+  setTotalCount,
+  updateLeadMetadata,
+} from "../../database/valuationProgress.db";
 
 // ============ STATIC DATA (REMOVED - Replaced by Store) ============
 
 // ============ ICON MAPPING FOR CARDS ============
-const getCardIcon = (cardName: string): { name: string; color: string } => {
+const getCardIcon = (cardName: string): { name: string; color: string; type: 'material' | 'image' } => {
   const normalizedName = cardName?.toLowerCase().trim() || '';
-  
+
   // Odometer
-  if (normalizedName.includes('odmeter') || normalizedName.includes('odometer')) 
-    return { name: 'counter', color: '#FF6B6B' };
-  
+  if (normalizedName.includes('odmeter') || normalizedName.includes('odometer'))
+    return { name: 'speedometer', color: '#FF6B6B', type: 'material' };
+
   // Dashboard & Interior
-  if (normalizedName.includes('dashboard')) 
-    return { name: 'view-dashboard', color: '#4ECDC4' };
-  if (normalizedName.includes('interior back')) 
-    return { name: 'car-seat', color: '#95E1D3' };
-  if (normalizedName.includes('interior')) 
-    return { name: 'car-door', color: '#45B7D1' };
-  
+  if (normalizedName.includes('dashboard'))
+    return { name: 'view-dashboard', color: '#4ECDC4', type: 'material' };
+  if (normalizedName.includes('interior back'))
+    return { name: 'car-seat-heater', color: '#95E1D3', type: 'material' };
+  if (normalizedName.includes('interior'))
+    return { name: 'car-seat', color: '#45B7D1', type: 'material' };
+
   // Engine
-  if (normalizedName.includes('engine')) 
-    return { name: 'engine', color: '#F38181' };
-  
+  if (normalizedName.includes('engine'))
+    return { name: 'engine-outline', color: '#F38181', type: 'material' };
+
   // Chassis
-  if (normalizedName.includes('chassis imprint')) 
-    return { name: 'stamper', color: '#AA96DA' };
-  if (normalizedName.includes('chassis plate')) 
-    return { name: 'card-text', color: '#FCBAD3' };
-  if (normalizedName.includes('chassis')) 
-    return { name: 'barcode', color: '#A8E6CF' };
-  
-  // Vehicle Sides
-  if (normalizedName.includes('front side')) 
-    return { name: 'arrow-up-circle', color: '#4A90E2' };
-  if (normalizedName.includes('right side')) 
-    return { name: 'arrow-right-circle', color: '#50C878' };
-  if (normalizedName.includes('back side') || normalizedName.includes('rear')) 
-    return { name: 'arrow-down-circle', color: '#FFB347' };
-  if (normalizedName.includes('left side')) 
-    return { name: 'arrow-left-circle', color: '#FF6F91' };
-  
-  // Tyres
-  if (normalizedName.includes('front right tyre')) 
-    return { name: 'car-tire-alert', color: '#5DADE2' };
-  if (normalizedName.includes('rear right tyre')) 
-    return { name: 'car-tire-alert', color: '#AF7AC5' };
-  if (normalizedName.includes('rear left tyre')) 
-    return { name: 'car-tire-alert', color: '#F39C12' };
-  if (normalizedName.includes('front left tyre')) 
-    return { name: 'car-tire-alert', color: '#52BE80' };
-  if (normalizedName.includes('tyre') || normalizedName.includes('tire')) 
-    return { name: 'car-tire-alert', color: '#566573' };
-  
-  // Selfie & RC
-  if (normalizedName.includes('selfie')) 
-    return { name: 'camera-account', color: '#E74C3C' };
-  if (normalizedName.includes('rc front')) 
-    return { name: 'file-document', color: '#3498DB' };
-  if (normalizedName.includes('rc back')) 
-    return { name: 'file-document-outline', color: '#9B59B6' };
-  if (normalizedName.includes('rc')) 
-    return { name: 'file-certificate', color: '#1ABC9C' };
-  
+  if (normalizedName.includes('chassis imprint'))
+    return { name: 'stamper', color: '#AA96DA', type: 'material' };
+  if (normalizedName.includes('chassis plate'))
+    return { name: 'card-text-outline', color: '#FCBAD3', type: 'material' };
+  if (normalizedName.includes('chassis'))
+    return { name: 'barcode-scan', color: '#A8E6CF', type: 'material' };
+
+  // Vehicle Sides - Enhanced with directions
+  if (normalizedName.includes('front side'))
+    return { name: 'car-front', color: '#4A90E2', type: 'material' };
+  if (normalizedName.includes('right side'))
+    return { name: 'car-side', color: '#50C878', type: 'material' };
+  if (normalizedName.includes('back side') || normalizedName.includes('rear'))
+    return { name: 'car-back', color: '#FFB347', type: 'material' };
+  if (normalizedName.includes('left side'))
+    return { name: 'car-side', color: '#FF6F91', type: 'material' };
+
+  // Tyres - Different icons for each position
+  if (normalizedName.includes('front right tyre'))
+    return { name: 'tire', color: '#5DADE2', type: 'material' };
+  if (normalizedName.includes('rear right tyre'))
+    return { name: 'tire', color: '#AF7AC5', type: 'material' };
+  if (normalizedName.includes('rear left tyre'))
+    return { name: 'tire', color: '#F39C12', type: 'material' };
+  if (normalizedName.includes('front left tyre'))
+    return { name: 'tire', color: '#52BE80', type: 'material' };
+  if (normalizedName.includes('tyre') || normalizedName.includes('tire'))
+    return { name: 'car-tire-alert', color: '#566573', type: 'material' };
+
+  // Documents
+  if (normalizedName.includes('selfie'))
+    return { name: 'account-circle', color: '#E74C3C', type: 'material' };
+  if (normalizedName.includes('rc front'))
+    return { name: 'file-document-edit', color: '#3498DB', type: 'material' };
+  if (normalizedName.includes('rc back'))
+    return { name: 'file-document-edit-outline', color: '#9B59B6', type: 'material' };
+  if (normalizedName.includes('rc'))
+    return { name: 'file-certificate-outline', color: '#1ABC9C', type: 'material' };
+
   // Optional & Information
-  if (normalizedName.includes('optional')) 
-    return { name: 'camera-plus', color: '#95A5A6' };
-  if (normalizedName.includes('information') || normalizedName.includes('record')) 
-    return { name: 'clipboard-text', color: '#34495E' };
-  
+  if (normalizedName.includes('optional'))
+    return { name: 'camera-plus-outline', color: '#95A5A6', type: 'material' };
+  if (normalizedName.includes('information') || normalizedName.includes('record'))
+    return { name: 'clipboard-text-outline', color: '#34495E', type: 'material' };
+
   // Video
-  if (normalizedName.includes('video')) 
-    return { name: 'video', color: '#E67E22' };
-  
-  return { name: 'camera', color: '#7F8C8D' }; // Default camera icon
+  if (normalizedName.includes('video'))
+    return { name: 'video-outline', color: '#E67E22', type: 'material' };
+
+  // Default with different icon sets
+  return { name: 'camera-outline', color: '#7F8C8D', type: 'material' };
 };
 
 // ============ COMPONENTS ============
@@ -151,14 +160,19 @@ const ConditionModal = ({
     }
   }, [open]);
 
-  if (!questionsData?.Questions) {
+  // ✅ UPDATED: Allow modal to open even without questions data
+  if (!questionsData) {
     return null;
   }
 
   const stepName = (questionsData.Name || '').toLowerCase();
   const isOdometer = stepName.includes('odometer') || stepName.includes('odmeter');
   const isChassisPlate = stepName.includes('chassis plate');
-  const questions = questionsData.Questions;
+  
+  // Handle missing questions gracefully
+  const questions = questionsData.Questions || null;
+  const hasQuestions = Boolean(questions);
+  
   const normalizedAnswers = (questionsData.Answer || '').replaceAll('~', '/');
   const answers = normalizedAnswers
     .split('/')
@@ -189,6 +203,13 @@ const ConditionModal = ({
   };
 
   const handleSubmit = () => {
+    // ✅ If no questions, just close the modal
+    if (!hasQuestions) {
+      onSubmit({});
+      onClose();
+      return;
+    }
+
     if (isOdometer) {
       if (!odometerReading.trim() || !keyAvailable.trim()) {
         ToastAndroid.show("Please enter odometer and select key availability", ToastAndroid.SHORT);
@@ -240,73 +261,85 @@ const ConditionModal = ({
             contentContainerStyle={styles.modalScrollContent}
             showsVerticalScrollIndicator={false}
           >
+            {/* ✅ Updated: Show title if questions exist, otherwise show generic message */}
             <RNText style={styles.modalTitle}>
-              {Array.isArray(questions) ? questions[0] : questions}
+              {hasQuestions
+                ? (Array.isArray(questions) ? questions[0] : questions)
+                : "Image Captured"}
             </RNText>
             <RNText style={styles.modalSubtitle}>For: {sideName}</RNText>
 
-            {isOdometer && Array.isArray(questions) && (
+            {/* Show content only if questions exist */}
+            {hasQuestions ? (
               <>
-                <RNText style={styles.optionsLabel}>{questions[0]}</RNText>
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="Odometer Reading"
-                  placeholderTextColor="#999"
-                  keyboardType="numeric"
-                  value={odometerReading}
-                  onChangeText={(value) => {
-                    setOdometerReading(value);
-                    setSelectedAnswer(value);
-                  }}
-                />
-                <RNText style={styles.optionsLabel}>{questions[1]}</RNText>
-                <View style={styles.optionsContainer}>
-                  {['Available', 'Not Available'].map((option) => (
-                    <TouchableOpacity
-                      key={option}
-                      style={[
-                        styles.optionButton,
-                        keyAvailable === option && styles.optionButtonSelected,
-                      ]}
-                      onPress={() => setKeyAvailable(option)}
-                      activeOpacity={0.7}
-                    >
-                      <RNText
-                        style={[
-                          styles.optionButtonText,
-                          keyAvailable === option && styles.optionButtonTextSelected,
-                        ]}
-                      >
-                        {option}
-                      </RNText>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </>
-            )}
+                {isOdometer && Array.isArray(questions) && (
+                  <>
+                    <RNText style={styles.optionsLabel}>{questions[0]}</RNText>
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder="Odometer Reading"
+                      placeholderTextColor="#999"
+                      keyboardType="numeric"
+                      value={odometerReading}
+                      onChangeText={(value) => {
+                        setOdometerReading(value);
+                        setSelectedAnswer(value);
+                      }}
+                    />
+                    <RNText style={styles.optionsLabel}>{questions[1]}</RNText>
+                    <View style={styles.optionsContainer}>
+                      {['Available', 'Not Available'].map((option) => (
+                        <TouchableOpacity
+                          key={option}
+                          style={[
+                            styles.optionButton,
+                            keyAvailable === option && styles.optionButtonSelected,
+                          ]}
+                          onPress={() => setKeyAvailable(option)}
+                          activeOpacity={0.7}
+                        >
+                          <RNText
+                            style={[
+                              styles.optionButtonText,
+                              keyAvailable === option && styles.optionButtonTextSelected,
+                            ]}
+                          >
+                            {option}
+                          </RNText>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
+                )}
 
-            {isChassisPlate && (
-              <>
-                <RNText style={styles.optionsLabel}>
-                  {Array.isArray(questions) ? questions[0] : questions}
-                </RNText>
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="Chassis Plate"
-                  placeholderTextColor="#999"
-                  value={chassisPlate}
-                  onChangeText={setChassisPlate}
-                />
-              </>
-            )}
+                {isChassisPlate && (
+                  <>
+                    <RNText style={styles.optionsLabel}>
+                      {Array.isArray(questions) ? questions[0] : questions}
+                    </RNText>
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder="Chassis Plate"
+                      placeholderTextColor="#999"
+                      value={chassisPlate}
+                      onChangeText={setChassisPlate}
+                    />
+                  </>
+                )}
 
-            {!isOdometer && !isChassisPlate && (
-              <>
-                <RNText style={styles.optionsLabel}>Select an option:</RNText>
-                <View style={styles.optionsContainer}>
-                  {renderAnswerOptions()}
-                </View>
+                {!isOdometer && !isChassisPlate && (
+                  <>
+                    <RNText style={styles.optionsLabel}>Select an option:</RNText>
+                    <View style={styles.optionsContainer}>
+                      {renderAnswerOptions()}
+                    </View>
+                  </>
+                )}
               </>
+            ) : (
+              <RNText style={styles.optionsLabel}>
+                ✓ Image captured successfully. You can now proceed to the next card.
+              </RNText>
             )}
           </ScrollView>
 
@@ -321,19 +354,25 @@ const ConditionModal = ({
               style={[
                 styles.modalButton,
                 styles.modalButtonSubmit,
-                ((isOdometer && (!odometerReading.trim() || !keyAvailable.trim())) ||
+                (
+                  (!hasQuestions) || // ✅ Allow submit if no questions
+                  (isOdometer && (!odometerReading.trim() || !keyAvailable.trim())) ||
                   (isChassisPlate && !chassisPlate.trim()) ||
-                  (!isOdometer && !isChassisPlate && !selectedAnswer)) &&
-                  styles.modalButtonDisabled,
+                  (!isOdometer && !isChassisPlate && !selectedAnswer)
+                ) && styles.modalButtonDisabled,
               ]}
               onPress={handleSubmit}
               disabled={
-                (isOdometer && (!odometerReading.trim() || !keyAvailable.trim())) ||
-                (isChassisPlate && !chassisPlate.trim()) ||
-                (!isOdometer && !isChassisPlate && !selectedAnswer)
+                hasQuestions && (
+                  (isOdometer && (!odometerReading.trim() || !keyAvailable.trim())) ||
+                  (isChassisPlate && !chassisPlate.trim()) ||
+                  (!isOdometer && !isChassisPlate && !selectedAnswer)
+                )
               }
             >
-              <RNText style={styles.modalButtonTextSubmit}>Submit</RNText>
+              <RNText style={styles.modalButtonTextSubmit}>
+                {hasQuestions ? 'Submit' : 'OK'}
+              </RNText>
             </TouchableOpacity>
           </View>
         </View>
@@ -439,9 +478,10 @@ const ValuateCard = ({
   isDone,
   id,
   vehicleType,
-  isClickable: _isClickable,
+  isClickable,
   appColumn,
   isUploading,
+  uploadStatus,
 }: {
   text: string;
   id: string;
@@ -450,10 +490,15 @@ const ValuateCard = ({
   isClickable?: boolean;
   appColumn?: string;
   isUploading?: boolean;
+  uploadStatus?: 'pending' | 'uploaded' | 'failed';
 }) => {
   const navigation = useNavigation();
 
   const HandleClick = () => {
+    if (!isClickable && !isDone) {
+      ToastAndroid.show("Please complete previous steps first", ToastAndroid.SHORT);
+      return;
+    }
     // Navigate to CustomCamera with appColumn for dynamic API param naming
     // @ts-ignore
     navigation.navigate("Camera", {
@@ -465,14 +510,15 @@ const ValuateCard = ({
   };
 
   const cardBackgroundStyle = {
-    backgroundColor: isDone ? "#ABEB94" : "white",
+    backgroundColor: isDone || uploadStatus === 'uploaded' ? "#ABEB94" : "white",
   };
 
   return (
     <TouchableOpacity
       onPress={HandleClick}
-      style={[styles.card, cardBackgroundStyle]}
-      activeOpacity={0.7}
+      style={[styles.card, cardBackgroundStyle, !isClickable && !isDone && styles.cardDisabled]}
+      activeOpacity={isClickable || isDone ? 0.7 : 1}
+      disabled={!isClickable && !isDone}
     >
       {isUploading ? (
         <RNText style={styles.uploadingText}>Uploading...</RNText>
@@ -482,6 +528,17 @@ const ValuateCard = ({
           source={{ uri: isDone }}
           resizeMode="cover"
         />
+      ) : uploadStatus === 'uploaded' ? (
+        // Show checkmark when uploaded but file is gone (cache cleared)
+        <View style={styles.capturedContainer}>
+          <MaterialCommunityIcons
+            name="check-circle"
+            size={48}
+            color="#4CAF50"
+            style={styles.checkIcon}
+          />
+          <RNText style={styles.capturedText}>Captured</RNText>
+        </View>
       ) : (
         <MaterialCommunityIcons
           name={getCardIcon(text).name}
@@ -517,7 +574,7 @@ const ValuationPage = () => {
 
   // Data from Route & Store
   const { leadId, displayId, vehicleType, leadData } = route.params as RouteParams;
-  const { steps, isLoading, fetchSteps, reset, uploadedSides, getSideImage } = useValuationStore();
+  const { steps, isLoading, fetchSteps, reset, sideUploads, getSideUpload, markLocalCaptured } = useValuationStore();
 
   const [_sidesDone, _setSidesDone] = useState<sidesDone[]>([]);
   const [OptionalInfoModalState, setOptionalInfoModalState] = useState({
@@ -530,65 +587,210 @@ const ValuationPage = () => {
   const [showConditionModal, setShowConditionModal] = useState(false);
   const [currentSideForCondition, setCurrentSideForCondition] = useState("");
   const [currentSideQuestionData, setCurrentSideQuestionData] = useState<any>(null);
+  const [showQueueModal, setShowQueueModal] = useState(false);
+  const [queueCount, setQueueCount] = useState(0);
+  const [sideUploadStatus, setSideUploadStatus] = useState<Record<string, 'pending' | 'uploaded' | 'failed'>>({});
+  const processedSidesRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
     if (leadId) {
       fetchSteps(leadId.toString());
     }
+    processedSidesRef.current = {};
+    setLastProcessedSide("");
     return () => reset();
   }, [leadId, fetchSteps, reset]);
+
+  const loadCapturedMedia = useCallback(async () => {
+    if (!leadId) return;
+    try {
+      const captured = await getCapturedMediaByLeadId(leadId.toString());
+      if (captured.length === 0) return;
+
+      const statusMap: Record<string, 'pending' | 'uploaded' | 'failed'> = {};
+
+      captured.forEach((item) => {
+        if (item.side && item.localUri) {
+          // ✅ FIX: Only mark as processed if already uploaded (from previous session)
+          // Don't mark newly captured sides (pending) as processed - they need to show modal
+          if (item.uploadStatus === 'uploaded') {
+            processedSidesRef.current[item.side] = true;
+          }
+          markLocalCaptured(item.side, item.localUri);
+        }
+        // Track uploadStatus for each side
+        if (item.side) {
+          statusMap[item.side] = item.uploadStatus;
+        }
+      });
+
+      setSideUploadStatus(statusMap);
+      
+      console.log('[ValuationPage] Loaded captured media:', {
+        total: captured.length,
+        uploaded: captured.filter(c => c.uploadStatus === 'uploaded').length,
+        pending: captured.filter(c => c.uploadStatus === 'pending').length,
+        processedSides: Object.keys(processedSidesRef.current),
+      });
+    } catch (error) {
+      console.error('[ValuationPage] Failed to load captured media:', error);
+    }
+  }, [leadId, markLocalCaptured]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadCapturedMedia();
+    }, [loadCapturedMedia])
+  );
+
+  // Subscribe to upload queue changes
+  useEffect(() => {
+    const unsubscribe = uploadQueueManager.subscribe((count) => {
+      setQueueCount(count);
+    });
+
+    // Initial load
+    uploadQueueManager.getQueueCount().then(count => setQueueCount(count));
+
+    return unsubscribe;
+  }, []);
 
   const [sideConditions, setSideConditions] = useState<Record<string, string>>({});
   const [lastProcessedSide, setLastProcessedSide] = useState<string>("");
 
   // Watch for uploaded sides from store and show condition modal
   useEffect(() => {
-    // If any new sides are uploaded (from Camera component), check if we need to show modal
-    if (uploadedSides.length > 0) {
+    console.log('[ValuationPage] Modal useEffect triggered:', {
+      sideUploadsLength: sideUploads?.length,
+      sideUploads: sideUploads?.map(s => ({ side: s.side, status: s.status })),
+      lastProcessedSide,
+      processedSides: Object.keys(processedSidesRef.current),
+    });
+
+    // If any new sides are uploaded (from Camera component), show modal
+    if (sideUploads && sideUploads.length > 0) {
       // Get the last uploaded side
-      const lastUploadedSide = uploadedSides[uploadedSides.length - 1];
-      
+      const lastUploadedSide = sideUploads[sideUploads.length - 1];
+
+      console.log('[ValuationPage] Checking last uploaded side:', {
+        side: lastUploadedSide?.side,
+        isNewSide: lastUploadedSide?.side !== lastProcessedSide,
+        isNotProcessed: !processedSidesRef.current[lastUploadedSide?.side],
+        canProcess: lastUploadedSide && 
+                    lastUploadedSide.side !== lastProcessedSide && 
+                    !processedSidesRef.current[lastUploadedSide.side],
+      });
+
       // Only process if this is a NEW side (not already processed)
-      if (lastUploadedSide && lastUploadedSide.side !== lastProcessedSide) {
-        const stepData = steps.find(s => s.Name === lastUploadedSide.side);
-        if (stepData?.Questions) {
-          setCurrentSideForCondition(lastUploadedSide.side);
-          
-          // Get processed question data from useQuestions hook
-          const questionData = getSideQuestion({
-            data: steps,
-            vehicleType: vehicleType,
-            nameInApplication: lastUploadedSide.side,
+      if (
+        lastUploadedSide &&
+        lastUploadedSide.side !== lastProcessedSide &&
+        !processedSidesRef.current[lastUploadedSide.side]
+      ) {
+        const normalizeName = (value?: string) => value?.toLowerCase().trim() || '';
+        const normalizedSide = normalizeName(lastUploadedSide.side);
+
+        // Find matching step using normalized names
+        const stepData = steps.find(s => normalizeName(s.Name) === normalizedSide);
+
+        console.log('[ValuationPage] Image captured for side:', {
+          side: lastUploadedSide.side,
+          found: !!stepData,
+          stepName: stepData?.Name,
+        });
+
+        // Get processed question data from useQuestions hook
+        // Pass the exact side name that was captured
+        const questionData = getSideQuestion({
+          data: steps,
+          vehicleType: vehicleType,
+          nameInApplication: stepData?.Name || lastUploadedSide.side,  // Use step name if found
+        });
+
+        const hasQuestions = Boolean(questionData?.Questions) &&
+          (Array.isArray(questionData?.Questions)
+            ? questionData.Questions.length > 0
+            : true);
+
+        // ✅ UPDATED: ALWAYS show modal for captured images, even if no questions
+        if (stepData) {
+          console.log('[ValuationPage] Opening modal for:', lastUploadedSide.side, {
+            hasQuestions,
+            questionsCount: Array.isArray(questionData?.Questions) ? questionData.Questions.length : 0,
           });
-          setCurrentSideQuestionData(questionData);
           
+          setCurrentSideForCondition(lastUploadedSide.side);
+          // For sides without questions, pass the step data anyway so modal can render
+          setCurrentSideQuestionData(questionData || stepData);
           setShowConditionModal(true);
+          processedSidesRef.current[lastUploadedSide.side] = true;
+          setLastProcessedSide(lastUploadedSide.side);
+        } else {
+          console.log('[ValuationPage] ❌ Step not found for side:', lastUploadedSide.side, 'Available steps:', steps.map(s => s.Name));
+          processedSidesRef.current[lastUploadedSide.side] = true;
           setLastProcessedSide(lastUploadedSide.side);
         }
       }
     }
-  }, [uploadedSides.length, steps, getSideQuestion, vehicleType, lastProcessedSide]);
+  }, [sideUploads?.length, steps, getSideQuestion, vehicleType, lastProcessedSide]);
 
   const clickableImageSides = useMemo(() => {
+    if (!steps || !Array.isArray(steps)) return [];
     return steps
       .filter((step) => step.Images !== false) // step.Images is boolean or undefined
       .map((step) => step.Name || "");
   }, [steps]);
 
   const optionalInfoItems = useMemo(() => {
+    if (!steps || !Array.isArray(steps)) return [];
     return steps.filter((step) => step.Images === false);
   }, [steps]);
 
+  useEffect(() => {
+    if (!leadId) return;
+    if (clickableImageSides.length === 0) return;
+
+    const leadIdStr = leadId.toString();
+
+    // Set expected total images for this lead (used in ValuatedLeads progress)
+    setTotalCount(leadIdStr, clickableImageSides.length).catch((error) => {
+      console.error('[ValuationPage] Failed to set total count:', error);
+    });
+
+    // Persist key lead metadata so ValuatedLeads can reliably navigate back
+    // with the correct vehicleType and identifiers, even after app restarts.
+    const dbVehicleType =
+      vehicleType ||
+      (leadData?.VehicleType ? leadData.VehicleType.toString() : '');
+
+    const dbRegNo =
+      (leadData?.RegNo || '').toString().toUpperCase() ||
+      (displayId || '').toString();
+
+    const dbProspectNo =
+      (leadData as any)?.LeadUId?.toString() ||
+      (leadData as any)?.ProspectNo?.toString() ||
+      '';
+
+    updateLeadMetadata(leadIdStr, {
+      regNo: dbRegNo,
+      prospectNo: dbProspectNo,
+      vehicleType: dbVehicleType,
+    }).catch((error) => {
+      console.error('[ValuationPage] Failed to update lead metadata:', error);
+    });
+  }, [leadId, clickableImageSides.length, vehicleType, leadData, displayId]);
+
   const ClickedSideImage = (side: string) => {
     // Get image URI from Zustand store
-    const imgUri = getSideImage(side);
-    return imgUri || "";
+    const sideUpload = getSideUpload(side);
+    return sideUpload?.localUri || "";
   };
 
   const isVideoRecorded = () => {
     // Check if video is recorded from Zustand store (same pattern as images)
-    const videoUri = getSideImage('Video');
-    return videoUri ? true : false;
+    const videoUpload = getSideUpload('Video');
+    return videoUpload?.localUri ? true : false;
   };
 
   const HandleVideoNavigation = () => {
@@ -600,7 +802,16 @@ const ValuationPage = () => {
     });
   };
 
+  const isAllImagesCaptured = () => {
+    if (!clickableImageSides.length) return false;
+    return clickableImageSides.every((side) => !!ClickedSideImage(side));
+  };
+
   const handleNextClick = async () => {
+    if (!isAllImagesCaptured()) {
+      ToastAndroid.show("Please capture all images first", ToastAndroid.SHORT);
+      return;
+    }
     // Match Expo behavior: navigate to VehicleDetails screen
     // @ts-ignore
     navigation.navigate("VehicleDetails", {
@@ -645,16 +856,22 @@ const ValuationPage = () => {
                   <RNText style={styles.noDataText}>No Data Found</RNText>
                 )}
                 {clickableImageSides?.map((side, index: number) => {
+                  const isUnlocked =
+                    index === 0 ||
+                    clickableImageSides
+                      .slice(0, index)
+                      .every((prevSide) => !!ClickedSideImage(prevSide));
                   return (
                     <ValuateCard
                       key={side + index}
                       id={leadId}
                       isDone={ClickedSideImage(side)}
-                      isClickable={true}
+                      isClickable={isUnlocked}
                       vehicleType={vehicleType}
                       text={side}
                       appColumn={steps.find(s => s.Name === side)?.Appcolumn || side}
                       isUploading={false}
+                      uploadStatus={sideUploadStatus[side]}
                     />
                   );
                 })}
@@ -663,8 +880,8 @@ const ValuationPage = () => {
                     Optional Information Record
                   </RNText>
                   {optionalInfoItems.map((item, index) => {
-                    const questionKey = Array.isArray(item.Questions) 
-                      ? item.Questions.join(',') 
+                    const questionKey = Array.isArray(item.Questions)
+                      ? item.Questions.join(',')
                       : (item.Questions || "");
                     return (
                       <Selector
@@ -696,10 +913,10 @@ const ValuationPage = () => {
             <TouchableOpacity
               onPress={handleNextClick}
               style={[
-                styles.nextBtn
-                // isDisabled() ? styles.nextBtnEnabled : styles.nextBtnDisabled,
+                styles.nextBtn,
+                isAllImagesCaptured() ? styles.nextBtnEnabled : styles.nextBtnDisabled,
               ]}
-              // disabled={!isDisabled()}
+              // disabled={!isAllImagesCaptured()} // Removed to allow toast on press
               activeOpacity={0.7}
             >
               <RNText style={styles.nextBtnText}>Next</RNText>
@@ -785,6 +1002,26 @@ const ValuationPage = () => {
           <RNText style={styles.noDataTextLarge}>No Data Found</RNText>
         </View>
       )}
+
+      {/* Floating Upload Queue Button */}
+      {/* {queueCount > 0 && (
+        <TouchableOpacity
+          style={styles.floatingQueueButton}
+          onPress={() => setShowQueueModal(true)}
+          activeOpacity={0.8}
+        >
+          <MaterialCommunityIcons name="cloud-upload" size={24} color="#fff" />
+          <View style={styles.queueBadge}>
+            <RNText style={styles.queueBadgeText}>{queueCount}</RNText>
+          </View>
+        </TouchableOpacity>
+      )} */}
+
+      {/* Upload Queue Modal */}
+      {/* <UploadQueueStatus
+        visible={showQueueModal}
+        onClose={() => setShowQueueModal(false)}
+      /> */}
     </SafeAreaView>
   );
 };
@@ -885,6 +1122,9 @@ const styles = StyleSheet.create({
   cardIcon: {
     marginBottom: 8,
   },
+  cardDisabled: {
+    opacity: 0.5,
+  },
   uploadingText: {
     fontSize: 16,
     color: "#0E4DEF",
@@ -896,6 +1136,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: COLORS.Dashboard.text.Grey,
+  },
+  capturedContainer: {
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 4,
+  },
+  checkIcon: {
+    marginBottom: 4,
+  },
+  capturedText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#4CAF50",
+    textAlign: "center",
   },
   infoRecordContainer: {
     width: "100%",
@@ -1074,6 +1328,39 @@ const styles = StyleSheet.create({
   },
   modalButtonDisabled: {
     opacity: 0.5,
+  },
+  floatingQueueButton: {
+    position: 'absolute',
+    bottom: 80,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#2196F3',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  queueBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#F44336',
+    borderRadius: 12,
+    minWidth: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+  },
+  queueBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });
 
